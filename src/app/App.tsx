@@ -1985,6 +1985,68 @@ function SimModule() {
   );
 }
 
+function MessageParticipantModal({ participant, onSend, onCancel }: {
+  participant: { id: string; name: string; email: string; dept: string; role: string };
+  onSend: (subject: string, body: string) => void;
+  onCancel: () => void;
+}) {
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [sent, setSent] = useState(false);
+
+  const handleSend = () => {
+    if (!subject.trim() || !body.trim()) { alert("Subject and message body are required"); return; }
+    onSend(subject.trim(), body.trim());
+    setSent(true);
+    setTimeout(onCancel, 900);
+  };
+
+  return (
+    <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onCancel} />
+      <motion.div className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-lg overflow-hidden" initial={{ opacity: 0, scale: 0.92, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 8 }} transition={{ duration: 0.25 }}>
+        <div className="h-1 w-full bg-gradient-to-r from-blue-400 via-primary/60 to-transparent" />
+        <div className="p-6 space-y-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-lg font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">MESSAGE PARTICIPANT</h2>
+              <p className="text-xs text-muted-foreground mt-1">Compose a direct message to this participant. It will be delivered to their notifications.</p>
+            </div>
+            <button onClick={onCancel} className="text-muted-foreground hover:text-foreground p-1 rounded hover:bg-secondary transition-colors flex-shrink-0"><X size={16} /></button>
+          </div>
+
+          <div className="flex items-center gap-3 p-3 rounded-lg bg-secondary/40 border border-border">
+            <AvatarCircle initials={participant.name.split(" ").map(n => n[0]).join("")} color="bg-blue-500/20" />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-foreground">{participant.name}</div>
+              <div className="text-[12px] text-muted-foreground truncate">{participant.role} · {participant.dept}</div>
+            </div>
+            <div className="flex items-center gap-1.5 text-[12px] font-mono text-muted-foreground flex-shrink-0"><Mail size={12} />{participant.email}</div>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Subject *</label>
+              <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="e.g., Upcoming Hazmat Level 2 session" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+            </div>
+            <div>
+              <label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Message *</label>
+              <textarea value={body} onChange={e => setBody(e.target.value)} rows={5} placeholder="Write your message to this participant..." className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+            </div>
+          </div>
+
+          <div className="flex gap-2.5 pt-2">
+            <button onClick={onCancel} className="flex-1 px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors">Cancel</button>
+            <button onClick={handleSend} disabled={sent} className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors ${sent ? "bg-green-500/90 text-white" : "bg-primary text-primary-foreground hover:bg-primary/90"}`}>
+              {sent ? <CheckCircle size={16} /> : <Send size={16} />}{sent ? "Sent" : "Send Message"}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function ParticipantProfileModal({ participant, onClose, onMessage }: {
   participant: { id: string; name: string; dept: string; role: string; level: string; certs: string[]; status: string; enrolled: number; email: string; phone: string; location: string; employeeId: string; joinDate: string; notes: string };
   onClose: () => void;
@@ -2103,6 +2165,7 @@ function ParticipantsModule() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [viewProfile, setViewProfile] = useState<(typeof participants)[number] | null>(null);
+  const [messageTarget, setMessageTarget] = useState<(typeof participants)[number] | null>(null);
   const app = useApp();
   const participants = [
     { id: "P-001", name: "Maria Santos", dept: "Rescue Alpha", role: "Team Leader", level: "Advanced", certs: ["CERT-A", "First Aid", "SCBA"], status: "Active", enrolled: 3, email: "m.santos@ems.gov", phone: "+63 917 200 1044", location: "Quezon City, NCR", employeeId: "EMP-1042", joinDate: "Jan 14, 2024", notes: "Team lead for Rescue Alpha; primary point of contact for earthquake response drills." },
@@ -2153,7 +2216,16 @@ function ParticipantsModule() {
         <ParticipantProfileModal
           participant={viewProfile}
           onClose={() => setViewProfile(null)}
-          onMessage={() => app.addNotification({ type: "Registration", subject: `Message queued for ${viewProfile.name}`, status: "Queued" })}
+          onMessage={() => setMessageTarget(viewProfile)}
+        />
+      )}
+      {messageTarget && (
+        <MessageParticipantModal
+          participant={messageTarget}
+          onSend={(subject, body) => {
+            app.addNotification({ type: "Registration", subject: `Message to ${messageTarget.name}: ${subject}`, body, status: "Sent" });
+          }}
+          onCancel={() => setMessageTarget(null)}
         />
       )}
       <div className="flex items-center justify-between">
@@ -2184,7 +2256,7 @@ function ParticipantsModule() {
                 </button>
                 <DropdownMenu items={[
                   { label: "View Full Profile", icon: Eye, onClick: () => setViewProfile(p) },
-                  { label: "Message Participant", icon: Mail, onClick: () => app.addNotification({ type: "Registration", subject: `Message queued for ${p.name}`, status: "Queued" }) },
+                  { label: "Message Participant", icon: Mail, onClick: () => setMessageTarget(p) },
                   { label: "Export Profile", icon: Download, onClick: () => exportRows(`dptss-profile-${p.id}`, `Participant Profile — ${p.name}`, [{ id: p.id, name: p.name, department: p.dept, role: p.role, level: p.level, status: p.status, email: p.email, phone: p.phone, employeeId: p.employeeId, joinDate: p.joinDate, certifications: p.certs.join("; "), enrolledPrograms: p.enrolled }], "csv") },
                 ]} />
               </div>

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { AppProvider, useApp } from "./appContext";
+import { AppProvider, useApp, type Program, type Session } from "./appContext";
 import { motion, AnimatePresence } from "motion/react";
 import {
   BookOpen, Cpu, Users, BarChart3, FileText, Bell, ChevronRight,
@@ -109,6 +109,8 @@ function Badge({ status, children }: { status?: string; children: React.ReactNod
     "In Progress": "bg-orange-500/15 text-orange-400 border-orange-500/20",
     Critical: "bg-red-500/15 text-red-400 border-red-500/20",
     Scheduled: "bg-purple-500/15 text-purple-400 border-purple-500/20",
+    Launched: "bg-green-500/15 text-green-400 border-green-500/20",
+    Cancelled: "bg-red-500/15 text-red-400 border-red-500/20",
     Low: "bg-green-500/15 text-green-400 border-green-500/20",
     Medium: "bg-yellow-500/15 text-yellow-400 border-yellow-500/20",
     High: "bg-orange-500/15 text-orange-400 border-orange-500/20",
@@ -148,6 +150,43 @@ function TabBar({ tabs, active, onChange }: { tabs: { id: string; label: string;
           </motion.button>
         );
       })}
+    </div>
+  );
+}
+
+type MenuItem = { label: string; icon?: React.ElementType; onClick: () => void; danger?: boolean };
+
+function DropdownMenu({ items, align = "right" }: { items: MenuItem[]; align?: "left" | "right" }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative inline-block">
+      <button onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }} className="text-muted-foreground hover:text-foreground p-1 rounded hover:bg-secondary transition-colors">
+        <MoreHorizontal size={16} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+          <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }} className={`absolute z-40 top-full mt-1 ${align === "right" ? "right-0" : "left-0"} w-52 bg-card border border-border rounded-md shadow-2xl py-1 overflow-hidden`}>
+            {items.map((it, i) => {
+              const Icon = it.icon;
+              return (
+                <button key={i} onClick={(e) => { e.stopPropagation(); it.onClick(); setOpen(false); }} className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-secondary/60 transition-colors ${it.danger ? "text-red-400" : "text-foreground"}`}>
+                  {Icon && <Icon size={13} />}{it.label}
+                </button>
+              );
+            })}
+          </motion.div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest mb-1">{label}</div>
+      <div className="text-sm text-foreground">{value ?? <span className="text-muted-foreground">—</span>}</div>
     </div>
   );
 }
@@ -980,7 +1019,7 @@ function AdminDashboard() {
   );
 }
 
-function NewProgramModal({ onConfirm, onCancel }: { onConfirm: (title: string, level: string, modules: number) => void; onCancel: () => void }) {
+function NewProgramModal({ onConfirm, onCancel }: { onConfirm: (title: string, level: string, modules: number, description: string) => void; onCancel: () => void }) {
   const [title, setTitle] = useState("");
   const [level, setLevel] = useState<"Basic" | "Intermediate" | "Advanced">("Basic");
   const [modules, setModules] = useState(4);
@@ -1020,7 +1059,7 @@ function NewProgramModal({ onConfirm, onCancel }: { onConfirm: (title: string, l
 
           <div className="flex gap-2.5 pt-2">
             <button onClick={onCancel} className="flex-1 px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors">Cancel</button>
-            <button onClick={() => { if (!title.trim()) { alert("Program title required"); return; } onConfirm(title, level, modules); }} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"><Plus size={16} />Create Program</button>
+            <button onClick={() => { if (!title.trim()) { alert("Program title required"); return; } onConfirm(title, level, modules, desc); }} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"><Plus size={16} />Create Program</button>
           </div>
         </div>
       </motion.div>
@@ -1175,35 +1214,528 @@ function ExportContextModal({ title, desc, color, rows, coreFields, filename, on
   );
 }
 
+type CurriculumProgram = Program & { source: "Seed Catalog" | "Admin-Added" };
+
+function ProgramDetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest mb-1">{label}</div>
+      <div className="text-sm text-foreground">{value ?? <span className="text-muted-foreground">—</span>}</div>
+    </div>
+  );
+}
+
+function ViewProgramModal({ program, onEdit, onClose }: { program: CurriculumProgram; onEdit: () => void; onClose: () => void }) {
+  return (
+    <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onClose} />
+      <motion.div className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto" initial={{ opacity: 0, scale: 0.92, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 8 }} transition={{ duration: 0.25 }}>
+        <div className="h-1 w-full bg-gradient-to-r from-primary via-primary/60 to-transparent sticky top-0" />
+        <div className="p-6 space-y-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1"><span className="text-[12px] font-mono text-muted-foreground">{program.id}</span><Badge status={program.status}>{program.status}</Badge><Badge status={program.level}>{program.level}</Badge><span className="text-[11px] font-mono text-muted-foreground">{program.source}</span></div>
+              <h2 className="text-2xl font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">{program.title}</h2>
+            </div>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground flex-shrink-0"><X size={18} /></button>
+          </div>
+
+          {program.description && (
+            <div className="p-3 rounded-lg bg-secondary/50 border border-border">
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest mb-1.5">Description</div>
+              <p className="text-sm text-foreground leading-relaxed">{program.description}</p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-4 gap-3 p-3 rounded-lg bg-secondary/30 border border-border">
+            <ProgramDetailRow label="Modules" value={program.modules} />
+            <ProgramDetailRow label="Duration" value={program.duration} />
+            <ProgramDetailRow label="Passing Score" value={program.passingScore ? `${program.passingScore}%` : undefined} />
+            <ProgramDetailRow label="Certification" value={program.certificationName} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <ProgramDetailRow label="Target Audience" value={program.targetAudience} />
+            <ProgramDetailRow label="Prerequisites" value={program.prerequisites} />
+            <ProgramDetailRow label="Created By" value={program.createdBy} />
+            <ProgramDetailRow label="Created Date" value={program.createdDate} />
+          </div>
+
+          {program.lastUpdated && (
+            <ProgramDetailRow label="Last Updated" value={new Date(program.lastUpdated).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })} />
+          )}
+
+          {!!program.tags?.length && (
+            <div>
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest mb-1.5">Tags</div>
+              <div className="flex flex-wrap gap-1.5">{program.tags.map(t => <span key={t} className="px-2 py-0.5 rounded text-[12px] font-mono bg-secondary text-muted-foreground border border-border">{t}</span>)}</div>
+            </div>
+          )}
+
+          {!!program.objectives?.length && (
+            <div>
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest mb-1.5">Learning Objectives</div>
+              <ul className="space-y-1.5">{program.objectives.map((o, i) => (<li key={i} className="flex items-start gap-2 text-sm text-foreground"><CheckSquare size={14} className="text-primary flex-shrink-0 mt-0.5" /><span>{o}</span></li>))}</ul>
+            </div>
+          )}
+
+          {!!program.moduleList?.length && (
+            <div>
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest mb-1.5">Module Breakdown</div>
+              <div className="space-y-1.5">
+                {program.moduleList.map((m, i) => (
+                  <div key={i} className="flex items-center justify-between px-3 py-2 rounded-md bg-secondary/40 border border-border">
+                    <div className="flex items-center gap-2 text-sm text-foreground"><span className="text-[12px] font-mono text-muted-foreground">M{i + 1}</span>{m.title}</div>
+                    <span className="text-[12px] font-mono text-muted-foreground">{m.duration}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2.5 pt-2">
+            <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors">Close</button>
+            <button onClick={onEdit} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"><Edit2 size={15} />Edit Program</button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function EditProgramModal({ program, onSave, onCancel }: { program: CurriculumProgram; onSave: (updates: Partial<Program>) => void; onCancel: () => void }) {
+  const [title, setTitle] = useState(program.title);
+  const [level, setLevel] = useState(program.level);
+  const [status, setStatus] = useState(program.status);
+  const [modules, setModules] = useState(program.modules);
+  const [duration, setDuration] = useState(program.duration);
+  const [description, setDescription] = useState(program.description ?? "");
+  const [prerequisites, setPrerequisites] = useState(program.prerequisites ?? "");
+  const [targetAudience, setTargetAudience] = useState(program.targetAudience ?? "");
+  const [certificationName, setCertificationName] = useState(program.certificationName ?? "");
+  const [passingScore, setPassingScore] = useState(program.passingScore ?? 80);
+  const [objectivesText, setObjectivesText] = useState((program.objectives ?? []).join("\n"));
+  const [tagsText, setTagsText] = useState((program.tags ?? []).join(", "));
+
+  const handleSave = () => {
+    if (!title.trim()) { alert("Program title required"); return; }
+    onSave({
+      title, level, status, modules, duration, description,
+      prerequisites, targetAudience, certificationName,
+      passingScore: Number(passingScore) || undefined,
+      objectives: objectivesText.split("\n").map(s => s.trim()).filter(Boolean),
+      tags: tagsText.split(",").map(s => s.trim()).filter(Boolean),
+    });
+  };
+
+  return (
+    <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onCancel} />
+      <motion.div className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto" initial={{ opacity: 0, scale: 0.92, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 8 }} transition={{ duration: 0.25 }}>
+        <div className="h-1 w-full bg-gradient-to-r from-primary via-primary/60 to-transparent sticky top-0" />
+        <div className="p-6 space-y-5">
+          <div>
+            <div className="flex items-center gap-2 mb-1"><span className="text-[12px] font-mono text-muted-foreground">{program.id}</span><span className="text-[11px] font-mono text-muted-foreground">{program.source}</span></div>
+            <h2 className="text-2xl font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">EDIT TRAINING PROGRAM</h2>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2"><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Program Title</label><input value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Difficulty Level</label><select value={level} onChange={e => setLevel(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"><option value="Basic">Basic</option><option value="Intermediate">Intermediate</option><option value="Advanced">Advanced</option></select></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Status</label><select value={status} onChange={e => setStatus(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"><option value="Draft">Draft</option><option value="Active">Active</option><option value="Archived">Archived</option></select></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Number of Modules</label><input type="number" min={1} max={20} value={modules} onChange={e => setModules(Number(e.target.value))} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Duration</label><input value={duration} onChange={e => setDuration(e.target.value)} placeholder="e.g., 6 hrs" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+          </div>
+
+          <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Program Description</label><textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" /></div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Target Audience</label><input value={targetAudience} onChange={e => setTargetAudience(e.target.value)} placeholder="e.g., Field responders, Tier 1" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Prerequisites</label><input value={prerequisites} onChange={e => setPrerequisites(e.target.value)} placeholder="e.g., None, or Basic First Aid" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Certification Awarded</label><input value={certificationName} onChange={e => setCertificationName(e.target.value)} placeholder="e.g., CERT-EQR-2026" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Passing Score (%)</label><input type="number" min={0} max={100} value={passingScore} onChange={e => setPassingScore(Number(e.target.value))} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+          </div>
+
+          <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Learning Objectives (one per line)</label><textarea value={objectivesText} onChange={e => setObjectivesText(e.target.value)} rows={3} placeholder={"Identify structural collapse hazards\nApply triage protocols under field conditions"} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" /></div>
+
+          <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Tags (comma separated)</label><input value={tagsText} onChange={e => setTagsText(e.target.value)} placeholder="e.g., Seismic, Field Ops, Tier 1" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+
+          <div className="flex gap-2.5 pt-2">
+            <button onClick={onCancel} className="flex-1 px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors">Cancel</button>
+            <button onClick={handleSave} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"><CheckCircle size={15} />Save Changes</button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+type CurriculumSession = Session & { source: "Seed Catalog" | "Admin-Added" };
+type Resource = { id: string; name: string; type: "Trainer" | "Equipment" | "Venue"; spec: string; available: boolean; description?: string; contactEmail?: string; phone?: string; location?: string; certifications?: string[]; condition?: string; lastMaintenance?: string; capacity?: number; assignedPrograms?: string[]; notes?: string; lastUpdated?: string };
+
+function ViewSessionModal({ session, onEdit, onClose }: { session: CurriculumSession; onEdit: () => void; onClose: () => void }) {
+  const pct = session.capacity ? Math.round((session.enrolled / session.capacity) * 100) : 0;
+  return (
+    <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onClose} />
+      <motion.div className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto" initial={{ opacity: 0, scale: 0.92, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 8 }} transition={{ duration: 0.25 }}>
+        <div className="h-1 w-full bg-gradient-to-r from-primary via-primary/60 to-transparent sticky top-0" />
+        <div className="p-6 space-y-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1"><span className="text-[12px] font-mono text-muted-foreground">{session.id}</span><Badge status={session.status ?? "Scheduled"}>{session.status ?? "Scheduled"}</Badge><span className="text-[11px] font-mono text-muted-foreground">{session.source}</span></div>
+              <h2 className="text-2xl font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">{session.course}</h2>
+            </div>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground flex-shrink-0"><X size={18} /></button>
+          </div>
+
+          {session.description && (
+            <div className="p-3 rounded-lg bg-secondary/50 border border-border">
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest mb-1.5">Description</div>
+              <p className="text-sm text-foreground leading-relaxed">{session.description}</p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-4 gap-3 p-3 rounded-lg bg-secondary/30 border border-border">
+            <DetailRow label="Date" value={session.date} />
+            <DetailRow label="Time" value={session.time} />
+            <DetailRow label="Format" value={session.sessionType} />
+            <DetailRow label="Trainer" value={session.trainer} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <DetailRow label="Location" value={session.location} />
+            <DetailRow label="Contact" value={session.contactEmail} />
+            <DetailRow label="Enrollment" value={<span>{session.enrolled}/{session.capacity} <span className="text-muted-foreground font-mono text-[12px]">({pct}% full)</span></span>} />
+            <DetailRow label="Waitlist" value={session.waitlist ?? 0} />
+            <DetailRow label="Created By" value={session.createdBy} />
+            <DetailRow label="Created Date" value={session.createdDate} />
+          </div>
+
+          <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden"><div className={`h-full rounded-full ${pct > 85 ? "bg-red-400" : "bg-primary"}`} style={{ width: `${Math.min(pct, 100)}%` }} /></div>
+
+          {session.lastUpdated && (
+            <DetailRow label="Last Updated" value={new Date(session.lastUpdated).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })} />
+          )}
+
+          {!!session.materials?.length && (
+            <div>
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest mb-1.5">Materials & Requirements</div>
+              <ul className="space-y-1.5">{session.materials.map((m, i) => (<li key={i} className="flex items-start gap-2 text-sm text-foreground"><CheckSquare size={14} className="text-primary flex-shrink-0 mt-0.5" /><span>{m}</span></li>))}</ul>
+            </div>
+          )}
+
+          {session.notes && (
+            <div>
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest mb-1.5">Notes</div>
+              <p className="text-sm text-foreground leading-relaxed">{session.notes}</p>
+            </div>
+          )}
+
+          <div className="flex gap-2.5 pt-2">
+            <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors">Close</button>
+            <button onClick={onEdit} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"><Edit2 size={15} />Edit Session</button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function EditSessionModal({ session, onSave, onCancel }: { session: CurriculumSession; onSave: (updates: Partial<Session>) => void; onCancel: () => void }) {
+  const [course, setCourse] = useState(session.course);
+  const [date, setDate] = useState(session.date);
+  const [time, setTime] = useState(session.time);
+  const [location, setLocation] = useState(session.location);
+  const [trainer, setTrainer] = useState(session.trainer);
+  const [status, setStatus] = useState(session.status ?? "Scheduled");
+  const [sessionType, setSessionType] = useState(session.sessionType ?? "In-Person");
+  const [enrolled, setEnrolled] = useState(session.enrolled);
+  const [capacity, setCapacity] = useState(session.capacity);
+  const [waitlist, setWaitlist] = useState(session.waitlist ?? 0);
+  const [contactEmail, setContactEmail] = useState(session.contactEmail ?? "");
+  const [description, setDescription] = useState(session.description ?? "");
+  const [materialsText, setMaterialsText] = useState((session.materials ?? []).join("\n"));
+  const [notes, setNotes] = useState(session.notes ?? "");
+
+  const handleSave = () => {
+    if (!course.trim()) { alert("Course name required"); return; }
+    onSave({
+      course, date, time, location, trainer, status, sessionType,
+      enrolled: Number(enrolled) || 0, capacity: Number(capacity) || 0, waitlist: Number(waitlist) || 0,
+      contactEmail, description, notes,
+      materials: materialsText.split("\n").map(s => s.trim()).filter(Boolean),
+    });
+  };
+
+  return (
+    <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onCancel} />
+      <motion.div className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto" initial={{ opacity: 0, scale: 0.92, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 8 }} transition={{ duration: 0.25 }}>
+        <div className="h-1 w-full bg-gradient-to-r from-primary via-primary/60 to-transparent sticky top-0" />
+        <div className="p-6 space-y-5">
+          <div>
+            <div className="flex items-center gap-2 mb-1"><span className="text-[12px] font-mono text-muted-foreground">{session.id}</span><span className="text-[11px] font-mono text-muted-foreground">{session.source}</span></div>
+            <h2 className="text-2xl font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">EDIT TRAINING SESSION</h2>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2"><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Course / Program</label><input value={course} onChange={e => setCourse(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Date</label><input value={date} onChange={e => setDate(e.target.value)} placeholder="e.g., Jul 03" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Time</label><input value={time} onChange={e => setTime(e.target.value)} placeholder="e.g., 08:00–12:00" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Format</label><select value={sessionType} onChange={e => setSessionType(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"><option value="In-Person">In-Person</option><option value="Virtual">Virtual</option><option value="Hybrid">Hybrid</option></select></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Status</label><select value={status} onChange={e => setStatus(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"><option value="Scheduled">Scheduled</option><option value="Launched">Launched</option><option value="Completed">Completed</option><option value="Cancelled">Cancelled</option></select></div>
+            <div className="col-span-2"><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Location</label><input value={location} onChange={e => setLocation(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Trainer</label><input value={trainer} onChange={e => setTrainer(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Contact Email</label><input value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="trainer@ems.gov" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Enrolled</label><input type="number" min={0} value={enrolled} onChange={e => setEnrolled(Number(e.target.value))} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Capacity</label><input type="number" min={0} value={capacity} onChange={e => setCapacity(Number(e.target.value))} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Waitlist</label><input type="number" min={0} value={waitlist} onChange={e => setWaitlist(Number(e.target.value))} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+          </div>
+
+          <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Description</label><textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" /></div>
+          <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Materials & Requirements (one per line)</label><textarea value={materialsText} onChange={e => setMaterialsText(e.target.value)} rows={3} placeholder={"Bring PPE\nField manual"} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" /></div>
+          <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Notes</label><textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" /></div>
+
+          <div className="flex gap-2.5 pt-2">
+            <button onClick={onCancel} className="flex-1 px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors">Cancel</button>
+            <button onClick={handleSave} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"><CheckCircle size={15} />Save Changes</button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function ViewResourceModal({ resource, onEdit, onClose }: { resource: Resource; onEdit: () => void; onClose: () => void }) {
+  return (
+    <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onClose} />
+      <motion.div className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-xl max-h-[85vh] overflow-y-auto" initial={{ opacity: 0, scale: 0.92, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 8 }} transition={{ duration: 0.25 }}>
+        <div className="h-1 w-full bg-gradient-to-r from-primary via-primary/60 to-transparent sticky top-0" />
+        <div className="p-6 space-y-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1"><span className="text-[12px] font-mono text-muted-foreground">{resource.id}</span><Badge status={resource.available ? "Active" : "Draft"}>{resource.available ? "Available" : "Committed"}</Badge><span className="text-[11px] font-mono text-muted-foreground">{resource.type}</span></div>
+              <h2 className="text-2xl font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">{resource.name}</h2>
+            </div>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground flex-shrink-0"><X size={18} /></button>
+          </div>
+
+          {resource.description && (
+            <div className="p-3 rounded-lg bg-secondary/50 border border-border">
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest mb-1.5">Description</div>
+              <p className="text-sm text-foreground leading-relaxed">{resource.description}</p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            <DetailRow label="Specialization" value={resource.spec} />
+            <DetailRow label="Location" value={resource.location} />
+            {resource.type === "Trainer" && <DetailRow label="Contact Email" value={resource.contactEmail} />}
+            {resource.type === "Trainer" && <DetailRow label="Phone" value={resource.phone} />}
+            {resource.type === "Equipment" && <DetailRow label="Condition" value={resource.condition} />}
+            {resource.type === "Equipment" && <DetailRow label="Last Maintenance" value={resource.lastMaintenance} />}
+            {resource.type === "Venue" && <DetailRow label="Capacity" value={resource.capacity} />}
+          </div>
+
+          {!!resource.certifications?.length && (
+            <div>
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest mb-1.5">Certifications</div>
+              <div className="flex flex-wrap gap-1.5">{resource.certifications.map(c => <span key={c} className="px-2 py-0.5 rounded text-[12px] font-mono bg-secondary text-muted-foreground border border-border">{c}</span>)}</div>
+            </div>
+          )}
+
+          {!!resource.assignedPrograms?.length && (
+            <div>
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest mb-1.5">Assigned Programs</div>
+              <div className="flex flex-wrap gap-1.5">{resource.assignedPrograms.map(p => <span key={p} className="px-2 py-0.5 rounded text-[12px] font-mono bg-secondary text-muted-foreground border border-border">{p}</span>)}</div>
+            </div>
+          )}
+
+          {resource.notes && (
+            <div>
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest mb-1.5">Notes</div>
+              <p className="text-sm text-foreground leading-relaxed">{resource.notes}</p>
+            </div>
+          )}
+
+          {resource.lastUpdated && (
+            <DetailRow label="Last Updated" value={new Date(resource.lastUpdated).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })} />
+          )}
+
+          <div className="flex gap-2.5 pt-2">
+            <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors">Close</button>
+            <button onClick={onEdit} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"><Edit2 size={15} />Edit Resource</button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function EditResourceModal({ resource, onSave, onCancel }: { resource: Resource; onSave: (updates: Partial<Resource>) => void; onCancel: () => void }) {
+  const [name, setName] = useState(resource.name);
+  const [type, setType] = useState(resource.type);
+  const [spec, setSpec] = useState(resource.spec);
+  const [available, setAvailable] = useState(resource.available);
+  const [location, setLocation] = useState(resource.location ?? "");
+  const [contactEmail, setContactEmail] = useState(resource.contactEmail ?? "");
+  const [phone, setPhone] = useState(resource.phone ?? "");
+  const [condition, setCondition] = useState(resource.condition ?? "");
+  const [lastMaintenance, setLastMaintenance] = useState(resource.lastMaintenance ?? "");
+  const [capacity, setCapacity] = useState(resource.capacity ?? 0);
+  const [description, setDescription] = useState(resource.description ?? "");
+  const [certificationsText, setCertificationsText] = useState((resource.certifications ?? []).join(", "));
+  const [notes, setNotes] = useState(resource.notes ?? "");
+
+  const handleSave = () => {
+    if (!name.trim()) { alert("Resource name required"); return; }
+    onSave({
+      name, type, spec, available, location, contactEmail, phone, condition, lastMaintenance,
+      capacity: Number(capacity) || undefined, description, notes,
+      certifications: certificationsText.split(",").map(s => s.trim()).filter(Boolean),
+    });
+  };
+
+  return (
+    <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onCancel} />
+      <motion.div className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-xl max-h-[85vh] overflow-y-auto" initial={{ opacity: 0, scale: 0.92, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 8 }} transition={{ duration: 0.25 }}>
+        <div className="h-1 w-full bg-gradient-to-r from-primary via-primary/60 to-transparent sticky top-0" />
+        <div className="p-6 space-y-5">
+          <div>
+            <div className="text-[12px] font-mono text-muted-foreground mb-1">{resource.id}</div>
+            <h2 className="text-2xl font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">EDIT RESOURCE</h2>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2"><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Name</label><input value={name} onChange={e => setName(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Type</label><select value={type} onChange={e => setType(e.target.value as Resource["type"])} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"><option value="Trainer">Trainer</option><option value="Equipment">Equipment</option><option value="Venue">Venue</option></select></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Availability</label><select value={available ? "1" : "0"} onChange={e => setAvailable(e.target.value === "1")} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"><option value="1">Available</option><option value="0">Committed</option></select></div>
+            <div className="col-span-2"><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Specialization</label><input value={spec} onChange={e => setSpec(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            <div className="col-span-2"><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Location</label><input value={location} onChange={e => setLocation(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            {type === "Trainer" && (<>
+              <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Contact Email</label><input value={contactEmail} onChange={e => setContactEmail(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+              <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Phone</label><input value={phone} onChange={e => setPhone(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            </>)}
+            {type === "Equipment" && (<>
+              <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Condition</label><input value={condition} onChange={e => setCondition(e.target.value)} placeholder="e.g., Good, Needs Inspection" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+              <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Last Maintenance</label><input value={lastMaintenance} onChange={e => setLastMaintenance(e.target.value)} placeholder="e.g., 2026-06-01" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            </>)}
+            {type === "Venue" && (
+              <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Capacity</label><input type="number" min={0} value={capacity} onChange={e => setCapacity(Number(e.target.value))} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+            )}
+          </div>
+
+          <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Description</label><textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" /></div>
+          <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Certifications (comma separated)</label><input value={certificationsText} onChange={e => setCertificationsText(e.target.value)} placeholder="e.g., ICS-300, HAZMAT Tech" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>
+          <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Notes</label><textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" /></div>
+
+          <div className="flex gap-2.5 pt-2">
+            <button onClick={onCancel} className="flex-1 px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors">Cancel</button>
+            <button onClick={handleSave} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"><CheckCircle size={15} />Save Changes</button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function TrainingModule() {
   const [tab, setTab] = useState<TrainingTab>("curriculum");
   const [showNewProgram, setShowNewProgram] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportType, setExportType] = useState<"programs" | "sessions" | "resources">("programs");
-  const courses = [
-    { id: "CRS-001", title: "Basic Earthquake Response", level: "Basic", modules: 5, duration: "4 hrs", status: "Active" },
-    { id: "CRS-002", title: "Advanced Flood Evacuation Protocols", level: "Advanced", modules: 8, duration: "6 hrs", status: "Active" },
-    { id: "CRS-003", title: "Wildfire Containment Basics", level: "Basic", modules: 4, duration: "3 hrs", status: "Active" },
-    { id: "CRS-004", title: "Chemical Hazmat Level 2", level: "Advanced", modules: 10, duration: "12 hrs", status: "Draft" },
-    { id: "CRS-005", title: "Mass Casualty Incident Management", level: "Intermediate", modules: 7, duration: "8 hrs", status: "Active" },
-  ];
-  const sessions = [
-    { id: "SES-001", course: "Basic Earthquake Response", date: "Jul 03", time: "08:00–12:00", location: "District 4 EOC", trainer: "Maj. Reyes", enrolled: 42, capacity: 60, status: "Scheduled" },
-    { id: "SES-002", course: "Advanced Flood Evacuation", date: "Jul 08", time: "09:00–15:00", location: "Virtual — MS Teams", trainer: "Capt. Santos", enrolled: 89, capacity: 100, status: "Scheduled" },
-    { id: "SES-003", course: "Hazmat Level 2", date: "Jul 10", time: "07:00–19:00", location: "Industrial Zone Fac.", trainer: "Dr. Villanueva", enrolled: 17, capacity: 30, status: "Scheduled" },
-  ];
-  const resources = [
-    { name: "Maj. Reyes", type: "Trainer", spec: "Seismic Response", available: true },
-    { name: "Capt. Santos", type: "Trainer", spec: "Flood/Water Rescue", available: true },
-    { name: "Dr. Villanueva", type: "Trainer", spec: "Hazmat / Chemical", available: false },
-    { name: "SCBA Units (×12)", type: "Equipment", spec: "Hazmat / Fire", available: true },
-    { name: "District 4 EOC", type: "Venue", spec: "Multi-purpose", available: true },
-  ];
+  const [viewingProgram, setViewingProgram] = useState<CurriculumProgram | null>(null);
+  const [editingProgram, setEditingProgram] = useState<CurriculumProgram | null>(null);
+  const [seedCourses, setSeedCourses] = useState<Program[]>([
+    {
+      id: "CRS-001", title: "Basic Earthquake Response", level: "Basic", modules: 5, duration: "4 hrs", status: "Active",
+      description: "Foundational course covering drop-cover-hold procedures, structural collapse hazards, and post-quake triage for first responders.",
+      objectives: ["Identify structural collapse hazards", "Execute drop-cover-hold and evacuation drills", "Apply initial triage protocols after a seismic event", "Coordinate with EOC during response"],
+      prerequisites: "None", targetAudience: "New field personnel, Rescue teams", certificationName: "CERT-EQR-2026", passingScore: 80,
+      tags: ["Seismic", "Field Ops", "Tier 1"], createdBy: "Maj. Reyes", createdDate: "2025-11-04", lastUpdated: "2026-06-29T09:00:00.000Z",
+      moduleList: [{ title: "Seismic Fundamentals", duration: "45 min" }, { title: "Structural Hazard ID", duration: "50 min" }, { title: "Drop-Cover-Hold Drills", duration: "45 min" }, { title: "Post-Quake Triage", duration: "50 min" }, { title: "Field Exercise & Assessment", duration: "60 min" }],
+    },
+    {
+      id: "CRS-002", title: "Advanced Flood Evacuation Protocols", level: "Advanced", modules: 8, duration: "6 hrs", status: "Active",
+      description: "Advanced water rescue and mass-evacuation planning for flood-prone districts, including swift-water hazards and shelter logistics.",
+      objectives: ["Plan district-level evacuation routes", "Operate swift-water rescue equipment safely", "Manage shelter intake and logistics", "Brief incident command on flood status"],
+      prerequisites: "Basic Water Safety, 1 yr field experience", targetAudience: "Rescue Alpha, Water Rescue units", certificationName: "CERT-FEP-2026", passingScore: 85,
+      tags: ["Flood", "Water Rescue", "Tier 2"], createdBy: "Capt. Santos", createdDate: "2025-09-18", lastUpdated: "2026-06-22T10:00:00.000Z",
+      moduleList: [{ title: "Flood Risk Assessment", duration: "45 min" }, { title: "Evacuation Route Planning", duration: "45 min" }, { title: "Swift-Water Hazards", duration: "50 min" }, { title: "Rescue Equipment Ops", duration: "50 min" }, { title: "Shelter Logistics", duration: "40 min" }, { title: "Incident Command Coordination", duration: "40 min" }, { title: "Simulation Drill", duration: "60 min" }, { title: "Assessment", duration: "30 min" }],
+    },
+    {
+      id: "CRS-003", title: "Wildfire Containment Basics", level: "Basic", modules: 4, duration: "3 hrs", status: "Active",
+      description: "Introductory wildfire behavior, containment line basics, and personal protective equipment for ground crews.",
+      objectives: ["Read basic fire behavior indicators", "Establish and hold a containment line", "Use PPE and equipment correctly", "Communicate status to command"],
+      prerequisites: "None", targetAudience: "Ground crew, New personnel", certificationName: "CERT-WFC-2026", passingScore: 75,
+      tags: ["Wildfire", "Field Ops", "Tier 1"], createdBy: "Dr. Villanueva", createdDate: "2025-10-02", lastUpdated: "2026-06-25T08:00:00.000Z",
+      moduleList: [{ title: "Fire Behavior Basics", duration: "45 min" }, { title: "Containment Line Techniques", duration: "50 min" }, { title: "PPE & Equipment", duration: "40 min" }, { title: "Field Exercise", duration: "45 min" }],
+    },
+    {
+      id: "CRS-004", title: "Chemical Hazmat Level 2", level: "Advanced", modules: 10, duration: "12 hrs", status: "Draft",
+      description: "Intermediate-to-advanced hazardous materials handling, decontamination procedures, and chemical incident command.",
+      objectives: ["Classify hazardous materials by type", "Perform decontamination procedures", "Operate in Level A/B protective suits", "Lead a hazmat incident briefing"],
+      prerequisites: "Hazmat Level 1", targetAudience: "Hazmat-certified responders", certificationName: "CERT-HZ2-2026", passingScore: 90,
+      tags: ["Hazmat", "Chemical", "Tier 3"], createdBy: "Dr. Villanueva", createdDate: "2026-05-14", lastUpdated: "2026-05-14T12:00:00.000Z",
+      moduleList: [{ title: "Chemical Classification", duration: "60 min" }, { title: "PPE Levels A–D", duration: "70 min" }, { title: "Decontamination Procedures", duration: "70 min" }, { title: "Detection Equipment", duration: "60 min" }, { title: "Containment Strategies", duration: "60 min" }, { title: "Incident Command", duration: "60 min" }, { title: "Casualty Management", duration: "60 min" }, { title: "Regulatory Compliance", duration: "50 min" }, { title: "Tabletop Exercise", duration: "90 min" }, { title: "Certification Assessment", duration: "60 min" }],
+    },
+    {
+      id: "CRS-005", title: "Mass Casualty Incident Management", level: "Intermediate", modules: 7, duration: "8 hrs", status: "Active",
+      description: "Structured triage, resource allocation, and command coordination for multi-casualty disaster scenarios.",
+      objectives: ["Apply START/SALT triage methodology", "Allocate limited medical resources under pressure", "Coordinate multi-agency response", "Document incident timeline accurately"],
+      prerequisites: "Basic First Aid, CPR Certification", targetAudience: "Medical teams, Incident commanders", certificationName: "CERT-MCI-2026", passingScore: 85,
+      tags: ["Medical", "Command", "Tier 2"], createdBy: "Capt. Santos", createdDate: "2026-01-20", lastUpdated: "2026-06-18T14:00:00.000Z",
+      moduleList: [{ title: "Triage Methodology", duration: "60 min" }, { title: "Resource Allocation", duration: "60 min" }, { title: "Multi-Agency Coordination", duration: "70 min" }, { title: "Field Documentation", duration: "45 min" }, { title: "Communications Protocol", duration: "45 min" }, { title: "Tabletop Simulation", duration: "90 min" }, { title: "Assessment", duration: "50 min" }],
+    },
+  ]);
+  const courses = seedCourses;
+  const [viewingSession, setViewingSession] = useState<CurriculumSession | null>(null);
+  const [editingSession, setEditingSession] = useState<CurriculumSession | null>(null);
+  const [seedSessions, setSeedSessions] = useState<Session[]>([
+    {
+      id: "SES-001", course: "Basic Earthquake Response", date: "Jul 03", time: "08:00–12:00", location: "District 4 EOC", trainer: "Maj. Reyes", enrolled: 42, capacity: 60, status: "Scheduled",
+      description: "Hands-on drop-cover-hold drills and structural hazard walkthrough for District 4 field personnel.",
+      sessionType: "In-Person", contactEmail: "reyes@ems.gov", waitlist: 3,
+      materials: ["Field manual (provided on-site)", "Closed-toe boots required", "Hard hat provided"],
+      notes: "Coordinate parking with EOC front desk; overflow lot available.",
+      createdBy: "Maj. Reyes", createdDate: "2026-06-10", lastUpdated: "2026-06-29T09:00:00.000Z",
+    },
+    {
+      id: "SES-002", course: "Advanced Flood Evacuation", date: "Jul 08", time: "09:00–15:00", location: "Virtual — MS Teams", trainer: "Capt. Santos", enrolled: 89, capacity: 100, status: "Scheduled",
+      description: "Remote session covering district evacuation planning and shelter logistics coordination.",
+      sessionType: "Virtual", contactEmail: "admin@ems.gov", waitlist: 0,
+      materials: ["MS Teams link (emailed 24 hrs prior)", "District evacuation map handout"],
+      notes: "Session will be recorded for personnel on shift.",
+      createdBy: "Capt. Santos", createdDate: "2026-06-01", lastUpdated: "2026-06-22T10:00:00.000Z",
+    },
+    {
+      id: "SES-003", course: "Hazmat Level 2", date: "Jul 10", time: "07:00–19:00", location: "Industrial Zone Fac.", trainer: "Dr. Villanueva", enrolled: 17, capacity: 30, status: "Scheduled",
+      description: "Full-day certification session covering Level A/B PPE, decontamination lines, and a tabletop exercise.",
+      sessionType: "In-Person", contactEmail: "villanueva@ems.gov", waitlist: 5,
+      materials: ["Level A/B suits provided", "Respirator fit-test required beforehand", "Lunch provided"],
+      notes: "Participants must complete Hazmat Level 1 prerequisite check-in by 06:45.",
+      createdBy: "Dr. Villanueva", createdDate: "2026-06-15", lastUpdated: "2026-06-25T08:00:00.000Z",
+    },
+  ]);
+  const sessions = seedSessions;
+  const [viewingResource, setViewingResource] = useState<Resource | null>(null);
+  const [editingResource, setEditingResource] = useState<Resource | null>(null);
+  const [seedResources, setSeedResources] = useState<Resource[]>([
+    { id: "RES-001", name: "Maj. Reyes", type: "Trainer", spec: "Seismic Response", available: true, description: "Lead seismic response instructor with 12 years of field command experience.", contactEmail: "reyes@ems.gov", phone: "+63 917 200 1145", location: "District 4 EOC", certifications: ["ICS-300 Intermediate Command", "Seismic Response Specialist"], assignedPrograms: ["Basic Earthquake Response"], notes: "Prefers morning sessions.", lastUpdated: "2026-06-28T09:00:00.000Z" },
+    { id: "RES-002", name: "Capt. Santos", type: "Trainer", spec: "Flood/Water Rescue", available: true, description: "Training Division captain overseeing curriculum design and water rescue instruction.", contactEmail: "admin@ems.gov", phone: "+63 917 200 2278", location: "Training Division HQ", certifications: ["ICS-300 Intermediate Command", "Master Training Specialist", "CPR/AED Instructor"], assignedPrograms: ["Advanced Flood Evacuation Protocols"], notes: "", lastUpdated: "2026-06-20T09:00:00.000Z" },
+    { id: "RES-003", name: "Dr. Villanueva", type: "Trainer", spec: "Hazmat / Chemical", available: false, description: "Hazmat program lead, currently committed to onsite certification sessions through mid-July.", contactEmail: "villanueva@ems.gov", phone: "+63 917 200 3390", location: "Industrial Zone Fac.", certifications: ["Hazmat Technician", "Chemical Incident Command"], assignedPrograms: ["Chemical Hazmat Level 2"], notes: "Committed through Jul 15 — do not double-book.", lastUpdated: "2026-06-25T08:00:00.000Z" },
+    { id: "RES-004", name: "SCBA Units (×12)", type: "Equipment", spec: "Hazmat / Fire", available: true, description: "Self-contained breathing apparatus sets for hazmat and fire response training.", location: "Equipment Depot A", condition: "Good — inspected quarterly", lastMaintenance: "2026-06-01", assignedPrograms: ["Chemical Hazmat Level 2", "Wildfire Containment Basics"], notes: "2 units currently reserved for Jul 10 session.", lastUpdated: "2026-06-15T09:00:00.000Z" },
+    { id: "RES-005", name: "District 4 EOC", type: "Venue", spec: "Multi-purpose", available: true, description: "Primary multi-purpose training venue with classroom and field exercise space.", location: "District 4, Quezon City", capacity: 80, assignedPrograms: ["Basic Earthquake Response"], notes: "Overflow parking available on-site.", lastUpdated: "2026-06-10T09:00:00.000Z" },
+  ]);
+  const resources = seedResources;
   const app = useApp();
 
   const allPrograms = [...courses.map(c => ({ ...c, source: "Seed Catalog" })), ...app.programs.map(p => ({ ...p, source: "Admin-Added" }))];
   const allSessions = [...sessions.map(s => ({ ...s, source: "Seed Catalog" })), ...app.sessions.map(s => ({ ...s, status: s.status || "Scheduled", source: "Admin-Added" }))];
-  const resourceRows = resources.map((r, i) => ({ id: `RES-${String(i + 1).padStart(3, "0")}`, name: r.name, type: r.type, specialization: r.spec, availability: r.available ? "Available" : "Committed" }));
+  const resourceRows = resources.map(r => ({ id: r.id, name: r.name, type: r.type, specialization: r.spec, availability: r.available ? "Available" : "Committed" }));
 
   const exportConfig = {
     programs: { title: "Training Programs", desc: "Export all training programs and curriculum data, including newly created programs.", color: "text-orange-400", rows: allPrograms, coreFields: ["id", "title", "level", "modules", "duration", "status"] },
@@ -1215,8 +1747,13 @@ function TrainingModule() {
     <div className="space-y-5">
       {showNewProgram && (
         <NewProgramModal
-          onConfirm={(title, level, modules) => {
-            app.addProgram({ id: "", title, level, modules, duration: `${modules * 2} hrs`, status: "Draft" });
+          onConfirm={(title, level, modules, description) => {
+            app.addProgram({
+              id: "", title, level, modules, duration: `${modules * 2} hrs`, status: "Draft",
+              description, objectives: [], prerequisites: "None", targetAudience: "",
+              certificationName: "", passingScore: 80, tags: [], createdBy: "Capt. Santos",
+              createdDate: new Date().toISOString().slice(0, 10), lastUpdated: new Date().toISOString(), moduleList: [],
+            });
             app.addNotification({ type: "Program", subject: `Program created: ${title}`, status: "Sent" });
             setShowNewProgram(false);
           }}
@@ -1246,13 +1783,35 @@ function TrainingModule() {
         </div>
       </div>
       <TabBar tabs={[{ id: "curriculum", label: "Curriculum Builder", icon: BookMarked }, { id: "schedule", label: "Scheduling", icon: Calendar }, { id: "resources", label: "Resource Allocation", icon: Package }]} active={tab} onChange={v => setTab(v as TrainingTab)} />
+      {viewingProgram && (
+        <ViewProgramModal
+          program={viewingProgram}
+          onClose={() => setViewingProgram(null)}
+          onEdit={() => { setEditingProgram(viewingProgram); setViewingProgram(null); }}
+        />
+      )}
+      {editingProgram && (
+        <EditProgramModal
+          program={editingProgram}
+          onCancel={() => setEditingProgram(null)}
+          onSave={(updates) => {
+            if (editingProgram.source === "Seed Catalog") {
+              setSeedCourses(prev => prev.map(c => c.id === editingProgram.id ? { ...c, ...updates, lastUpdated: new Date().toISOString() } : c));
+              app.addNotification({ type: "Program", subject: `Program updated: ${updates.title ?? editingProgram.title}`, status: "Sent" });
+            } else {
+              app.updateProgram(editingProgram.id, updates);
+            }
+            setEditingProgram(null);
+          }}
+        />
+      )}
       {tab === "curriculum" && (
         <div className="space-y-2">
-          {courses.map(c => (
+          {allPrograms.map(c => (
             <div key={c.id} className="bg-card border border-border rounded-lg p-4 hover:border-[rgba(240,165,0,0.2)] transition-colors group">
               <div className="flex items-center gap-4">
                 <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-0.5"><span className="text-[12px] font-mono text-muted-foreground">{c.id}</span><Badge status={c.status}>{c.status}</Badge><Badge status={c.level}>{c.level}</Badge></div>
+                  <div className="flex items-center gap-2 mb-0.5"><span className="text-[12px] font-mono text-muted-foreground">{c.id || "—"}</span><Badge status={c.status}>{c.status}</Badge><Badge status={c.level}>{c.level}</Badge><span className="text-[11px] font-mono text-muted-foreground">{c.source}</span></div>
                   <h3 className="text-sm font-semibold text-foreground">{c.title}</h3>
                 </div>
                 <div className="flex gap-6 text-center">
@@ -1260,32 +1819,87 @@ function TrainingModule() {
                   <div><div className="text-lg font-bold font-['Barlow_Condensed'] text-foreground">{c.duration}</div><div className="text-[12px] font-mono text-muted-foreground">duration</div></div>
                 </div>
                 <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded bg-secondary flex items-center gap-1"><Edit2 size={12} />Edit</button>
-                  <button className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded bg-secondary flex items-center gap-1"><Eye size={12} />View</button>
+                  <button onClick={() => setEditingProgram(c as CurriculumProgram)} className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded bg-secondary flex items-center gap-1"><Edit2 size={12} />Edit</button>
+                  <button onClick={() => setViewingProgram(c as CurriculumProgram)} className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded bg-secondary flex items-center gap-1"><Eye size={12} />View</button>
                 </div>
               </div>
             </div>
           ))}
         </div>
       )}
+      {viewingSession && (
+        <ViewSessionModal
+          session={viewingSession}
+          onClose={() => setViewingSession(null)}
+          onEdit={() => { setEditingSession(viewingSession); setViewingSession(null); }}
+        />
+      )}
+      {editingSession && (
+        <EditSessionModal
+          session={editingSession}
+          onCancel={() => setEditingSession(null)}
+          onSave={(updates) => {
+            if (editingSession.source === "Seed Catalog") {
+              setSeedSessions(prev => prev.map(s => s.id === editingSession.id ? { ...s, ...updates, lastUpdated: new Date().toISOString() } : s));
+              app.addNotification({ type: "Session", subject: `Session updated: ${updates.course ?? editingSession.course}`, status: "Sent" });
+            } else {
+              app.updateSession(editingSession.id, updates);
+            }
+            setEditingSession(null);
+          }}
+        />
+      )}
       {tab === "schedule" && (
         <div className="bg-card border border-border rounded-lg overflow-hidden">
           <table className="w-full text-sm">
-            <thead><tr className="border-b border-border bg-secondary/40">{["ID", "Course", "Date", "Location", "Trainer", "Enrollment", ""].map(h => <th key={h} className="text-left text-[12px] font-mono font-medium text-muted-foreground uppercase tracking-widest px-4 py-3">{h}</th>)}</tr></thead>
-            <tbody>{sessions.map((s, i) => { const pct = Math.round(s.enrolled / s.capacity * 100); return (<tr key={s.id} className={`border-b border-border hover:bg-secondary/30 ${i === sessions.length - 1 ? "border-b-0" : ""}`}><td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.id}</td><td className="px-4 py-3 text-xs font-semibold text-foreground">{s.course}</td><td className="px-4 py-3"><div className="text-xs font-mono text-foreground">{s.date}</div><div className="text-[12px] font-mono text-muted-foreground">{s.time}</div></td><td className="px-4 py-3 text-xs text-muted-foreground">{s.location}</td><td className="px-4 py-3 text-xs text-muted-foreground">{s.trainer}</td><td className="px-4 py-3 min-w-[120px]"><div className="flex items-center gap-2"><div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden"><div className={`h-full rounded-full ${pct > 85 ? "bg-red-400" : "bg-primary"}`} style={{ width: `${pct}%` }} /></div><span className="text-[12px] font-mono text-muted-foreground">{s.enrolled}/{s.capacity}</span></div></td><td className="px-4 py-3"><button className="text-muted-foreground hover:text-foreground"><MoreHorizontal size={16} /></button></td></tr>); })}</tbody>
+            <thead><tr className="border-b border-border bg-secondary/40">{["ID", "Course", "Date", "Location", "Trainer", "Enrollment", "Status", ""].map(h => <th key={h} className="text-left text-[12px] font-mono font-medium text-muted-foreground uppercase tracking-widest px-4 py-3">{h}</th>)}</tr></thead>
+            <tbody>{allSessions.map((s, i) => { const pct = Math.round(s.enrolled / s.capacity * 100); return (<tr key={s.id} className={`border-b border-border hover:bg-secondary/30 ${i === allSessions.length - 1 ? "border-b-0" : ""}`}><td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.id}</td><td className="px-4 py-3 text-xs font-semibold text-foreground">{s.course}</td><td className="px-4 py-3"><div className="text-xs font-mono text-foreground">{s.date}</div><div className="text-[12px] font-mono text-muted-foreground">{s.time}</div></td><td className="px-4 py-3 text-xs text-muted-foreground">{s.location}</td><td className="px-4 py-3 text-xs text-muted-foreground">{s.trainer}</td><td className="px-4 py-3 min-w-[120px]"><div className="flex items-center gap-2"><div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden"><div className={`h-full rounded-full ${pct > 85 ? "bg-red-400" : "bg-primary"}`} style={{ width: `${Math.min(pct, 100)}%` }} /></div><span className="text-[12px] font-mono text-muted-foreground">{s.enrolled}/{s.capacity}</span></div></td><td className="px-4 py-3"><Badge status={s.status}>{s.status}</Badge></td><td className="px-4 py-3">
+              <DropdownMenu items={[
+                { label: "View Details", icon: Eye, onClick: () => setViewingSession(s as CurriculumSession) },
+                { label: "Edit Session", icon: Edit2, onClick: () => setEditingSession(s as CurriculumSession) },
+                { label: "Duplicate Session", icon: PlusCircle, onClick: () => { const { source: _src, ...base } = s as CurriculumSession; app.createSession({ ...base, id: "", status: "Scheduled", enrolled: 0 }); app.addNotification({ type: "Session", subject: `Duplicated session: ${s.course}`, status: "Sent" }); } },
+                ...(s.status !== "Cancelled" ? [{ label: "Cancel Session", icon: XCircle, danger: true, onClick: () => {
+                  if (s.source === "Seed Catalog") { setSeedSessions(prev => prev.map(x => x.id === s.id ? { ...x, status: "Cancelled" } : x)); app.addNotification({ type: "Session", subject: `Session ${s.id} cancelled`, status: "Sent" }); }
+                  else { app.cancelSession(s.id); }
+                } }] : []),
+              ]} />
+            </td></tr>); })}</tbody>
           </table>
         </div>
+      )}
+      {viewingResource && (
+        <ViewResourceModal
+          resource={viewingResource}
+          onClose={() => setViewingResource(null)}
+          onEdit={() => { setEditingResource(viewingResource); setViewingResource(null); }}
+        />
+      )}
+      {editingResource && (
+        <EditResourceModal
+          resource={editingResource}
+          onCancel={() => setEditingResource(null)}
+          onSave={(updates) => {
+            setSeedResources(prev => prev.map(r => r.id === editingResource.id ? { ...r, ...updates, lastUpdated: new Date().toISOString() } as Resource : r));
+            app.addNotification({ type: "Resource", subject: `Resource updated: ${updates.name ?? editingResource.name}`, status: "Sent" });
+            setEditingResource(null);
+          }}
+        />
       )}
       {tab === "resources" && (
         <div className="space-y-2">
           {resources.map(r => (
-            <div key={r.name} className="bg-card border border-border rounded-lg p-3 flex items-center gap-4 hover:border-[rgba(240,165,0,0.2)] transition-colors">
+            <div key={r.id} className="bg-card border border-border rounded-lg p-3 flex items-center gap-4 hover:border-[rgba(240,165,0,0.2)] transition-colors">
               <div className="w-8 h-8 rounded-md bg-secondary flex items-center justify-center flex-shrink-0">
                 {r.type === "Trainer" ? <User size={15} className="text-muted-foreground" /> : r.type === "Equipment" ? <Package size={15} className="text-muted-foreground" /> : <Building2 size={15} className="text-muted-foreground" />}
               </div>
               <div className="flex-1"><div className="text-sm font-semibold text-foreground">{r.name}</div><div className="text-[12px] font-mono text-muted-foreground">{r.type} · {r.spec}</div></div>
               <span className={`flex items-center gap-1 text-[12px] font-mono ${r.available ? "text-green-400" : "text-orange-400"}`}><span className={`w-1.5 h-1.5 rounded-full ${r.available ? "bg-green-400" : "bg-orange-400"}`} />{r.available ? "Available" : "Committed"}</span>
-              <button className="text-muted-foreground hover:text-foreground"><MoreHorizontal size={16} /></button>
+              <DropdownMenu items={[
+                { label: "View Details", icon: Eye, onClick: () => setViewingResource(r) },
+                { label: "Edit Resource", icon: Edit2, onClick: () => setEditingResource(r) },
+                { label: r.available ? "Mark Committed" : "Mark Available", icon: RefreshCw, onClick: () => { setSeedResources(prev => prev.map(x => x.id === r.id ? { ...x, available: !x.available, lastUpdated: new Date().toISOString() } : x)); app.addNotification({ type: "Resource", subject: `${r.name} marked ${!r.available ? "Available" : "Committed"}`, status: "Sent" }); } },
+                { label: "Remove Resource", icon: Trash2, danger: true, onClick: () => setSeedResources(prev => prev.filter(x => x.id !== r.id)) },
+              ]} />
             </div>
           ))}
         </div>
@@ -1371,18 +1985,131 @@ function SimModule() {
   );
 }
 
+function ParticipantProfileModal({ participant, onClose, onMessage }: {
+  participant: { id: string; name: string; dept: string; role: string; level: string; certs: string[]; status: string; enrolled: number; email: string; phone: string; location: string; employeeId: string; joinDate: string; notes: string };
+  onClose: () => void;
+  onMessage: () => void;
+}) {
+  const app = useApp();
+  const attendance = app.getAttendanceFor(participant.id);
+  const completed = attendance.filter(r => r.status === "Completed").length;
+  const avgScore = attendance.filter(r => typeof r.score === "number").length
+    ? Math.round(attendance.reduce((s, r) => s + (r.score ?? 0), 0) / attendance.filter(r => typeof r.score === "number").length)
+    : null;
+
+  return (
+    <AnimatePresence>
+      <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+        <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onClose} />
+        <motion.div
+          className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[88vh] overflow-hidden flex flex-col"
+          initial={{ opacity: 0, scale: 0.94, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }}
+          transition={{ duration: 0.22, ease: [0.25, 0.46, 0.45, 0.94] }}
+        >
+          <div className="h-1 w-full bg-gradient-to-r from-primary via-primary/60 to-transparent flex-shrink-0" />
+
+          <div className="p-6 flex items-start justify-between gap-4 border-b border-border flex-shrink-0">
+            <div className="flex items-center gap-3.5">
+              <AvatarCircle initials={participant.name.split(" ").map(n => n[0]).join("")} color="bg-blue-500/20" />
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">{participant.name}</h2>
+                  <Badge status={participant.status}>{participant.status}</Badge>
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5">{participant.role} · {participant.dept}</div>
+                <div className="text-[11px] font-mono text-muted-foreground mt-0.5">{participant.id} · {participant.employeeId}</div>
+              </div>
+            </div>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-secondary flex-shrink-0"><X size={18} /></button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6 space-y-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <div className="flex items-center gap-2">
+              <Badge status={participant.level}>{participant.level}</Badge>
+              <span className="text-[12px] font-mono text-muted-foreground">Enrolled in {participant.enrolled} program{participant.enrolled === 1 ? "" : "s"}</span>
+            </div>
+
+            <div>
+              <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2.5">Contact Information</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex items-center gap-2.5 bg-secondary/40 rounded-md p-2.5"><Mail size={14} className="text-muted-foreground flex-shrink-0" /><span className="text-xs font-mono text-foreground truncate">{participant.email}</span></div>
+                <div className="flex items-center gap-2.5 bg-secondary/40 rounded-md p-2.5"><Phone size={14} className="text-muted-foreground flex-shrink-0" /><span className="text-xs font-mono text-foreground">{participant.phone}</span></div>
+                <div className="flex items-center gap-2.5 bg-secondary/40 rounded-md p-2.5"><Briefcase size={14} className="text-muted-foreground flex-shrink-0" /><span className="text-xs text-foreground">{participant.dept}</span></div>
+                <div className="flex items-center gap-2.5 bg-secondary/40 rounded-md p-2.5"><MapPinned size={14} className="text-muted-foreground flex-shrink-0" /><span className="text-xs text-foreground truncate">{participant.location}</span></div>
+                <div className="flex items-center gap-2.5 bg-secondary/40 rounded-md p-2.5"><Calendar size={14} className="text-muted-foreground flex-shrink-0" /><span className="text-xs text-foreground">Joined {participant.joinDate}</span></div>
+                <div className="flex items-center gap-2.5 bg-secondary/40 rounded-md p-2.5"><Hash size={14} className="text-muted-foreground flex-shrink-0" /><span className="text-xs font-mono text-foreground">{participant.employeeId}</span></div>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2.5">Certifications</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {participant.certs.length ? participant.certs.map(c => (
+                  <span key={c} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20"><Award size={12} />{c}</span>
+                )) : <span className="text-xs text-muted-foreground">No certifications on record.</span>}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2.5">Training Summary</h3>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-secondary/40 rounded-md p-3"><div className="text-lg font-bold text-foreground">{attendance.length}</div><div className="text-[11px] text-muted-foreground">Total Sessions</div></div>
+                <div className="bg-secondary/40 rounded-md p-3"><div className="text-lg font-bold text-foreground">{completed}</div><div className="text-[11px] text-muted-foreground">Completed</div></div>
+                <div className="bg-secondary/40 rounded-md p-3"><div className="text-lg font-bold text-foreground">{avgScore !== null ? `${avgScore}%` : "—"}</div><div className="text-[11px] text-muted-foreground">Avg. Score</div></div>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2.5">Training Attendance History</h3>
+              {attendance.length ? (
+                <div className="bg-secondary/40 rounded-md overflow-hidden divide-y divide-border">
+                  {attendance.map(r => (
+                    <div key={r.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-foreground truncate">{r.program}</div>
+                        <div className="text-[11px] font-mono text-muted-foreground">{new Date(r.date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}{r.certificate ? ` · ${r.certificate}` : ""}</div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {typeof r.score === "number" && <span className="text-[11px] font-mono text-muted-foreground">{r.score}%</span>}
+                        <Badge status={r.status}>{r.status}</Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="text-xs text-muted-foreground">No attendance records found for this participant.</p>}
+            </div>
+
+            {participant.notes && (
+              <div>
+                <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2.5">Notes</h3>
+                <p className="text-xs text-muted-foreground bg-secondary/40 rounded-md p-3 leading-relaxed">{participant.notes}</p>
+              </div>
+            )}
+          </div>
+
+          <div className="p-4 border-t border-border flex items-center justify-end gap-2 flex-shrink-0 bg-card">
+            <button onClick={onMessage} className="flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors"><Mail size={14} />Message Participant</button>
+            <button onClick={onClose} className="px-3 py-2 rounded-md text-xs font-semibold bg-secondary text-foreground hover:bg-secondary/80 transition-colors">Close</button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 function ParticipantsModule() {
   const [tab, setTab] = useState<ParticipantTab>("profiles");
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [viewProfile, setViewProfile] = useState<(typeof participants)[number] | null>(null);
   const app = useApp();
   const participants = [
-    { id: "P-001", name: "Maria Santos", dept: "Rescue Alpha", role: "Team Leader", level: "Advanced", certs: ["CERT-A", "First Aid", "SCBA"], status: "Active", enrolled: 3 },
-    { id: "P-002", name: "Jose Reyes", dept: "Medical Bravo", role: "Medic", level: "Intermediate", certs: ["EMT-B", "CPR"], status: "Active", enrolled: 2 },
-    { id: "P-003", name: "Ana Cruz", dept: "Command HQ", role: "Communications", level: "Advanced", certs: ["CERT-A", "ICS-200"], status: "Active", enrolled: 4 },
-    { id: "P-004", name: "Carlos Bautista", dept: "Supply Delta", role: "Logistics", level: "Basic", certs: ["First Aid"], status: "Pending", enrolled: 1 },
-    { id: "P-005", name: "Elena Villanueva", dept: "Hazmat Echo", role: "Hazmat Specialist", level: "Advanced", certs: ["HAZMAT-OPS", "SCBA"], status: "Active", enrolled: 5 },
+    { id: "P-001", name: "Maria Santos", dept: "Rescue Alpha", role: "Team Leader", level: "Advanced", certs: ["CERT-A", "First Aid", "SCBA"], status: "Active", enrolled: 3, email: "m.santos@ems.gov", phone: "+63 917 200 1044", location: "Quezon City, NCR", employeeId: "EMP-1042", joinDate: "Jan 14, 2024", notes: "Team lead for Rescue Alpha; primary point of contact for earthquake response drills." },
+    { id: "P-002", name: "Jose Reyes", dept: "Medical Bravo", role: "Medic", level: "Intermediate", certs: ["EMT-B", "CPR"], status: "Active", enrolled: 2, email: "j.reyes@ems.gov", phone: "+63 917 200 1055", location: "Makati City, NCR", employeeId: "EMP-1078", joinDate: "Mar 2, 2024", notes: "" },
+    { id: "P-003", name: "Ana Cruz", dept: "Command HQ", role: "Communications", level: "Advanced", certs: ["CERT-A", "ICS-200"], status: "Active", enrolled: 4, email: "a.cruz@ems.gov", phone: "+63 917 200 1066", location: "Pasig City, NCR", employeeId: "EMP-1015", joinDate: "Nov 8, 2023", notes: "Handles comms net during multi-agency drills." },
+    { id: "P-004", name: "Carlos Bautista", dept: "Supply Delta", role: "Logistics", level: "Basic", certs: ["First Aid"], status: "Pending", enrolled: 1, email: "c.bautista@ems.gov", phone: "+63 917 200 1077", location: "Mandaluyong City, NCR", employeeId: "EMP-1103", joinDate: "Jun 19, 2024", notes: "Pending certification review before Active status." },
+    { id: "P-005", name: "Elena Villanueva", dept: "Hazmat Echo", role: "Hazmat Specialist", level: "Advanced", certs: ["HAZMAT-OPS", "SCBA"], status: "Active", enrolled: 5, email: "e.villanueva@ems.gov", phone: "+63 917 200 1088", location: "Taguig City, NCR", employeeId: "EMP-1029", joinDate: "Feb 27, 2023", notes: "Certified SCBA field operations instructor." },
   ];
 
   const allParticipants = [
@@ -1422,6 +2149,13 @@ function ParticipantsModule() {
           onCancel={() => setShowExportModal(false)}
         />
       )}
+      {viewProfile && (
+        <ParticipantProfileModal
+          participant={viewProfile}
+          onClose={() => setViewProfile(null)}
+          onMessage={() => app.addNotification({ type: "Registration", subject: `Message queued for ${viewProfile.name}`, status: "Queued" })}
+        />
+      )}
       <div className="flex items-center justify-between">
         <div><h1 className="text-4xl font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">PARTICIPANT REGISTRATION</h1><p className="text-muted-foreground text-base mt-0.5">Profiles · attendance records · self-service portal · notifications</p></div>
         <div className="flex items-center gap-2">
@@ -1436,7 +2170,7 @@ function ParticipantsModule() {
           const completedCount = history.filter(r => r.status === "Completed").length;
           const isOpen = expandedId === p.id;
           return (
-            <div key={p.id} className="bg-card border border-border rounded-lg overflow-hidden hover:border-[rgba(240,165,0,0.2)] transition-colors">
+            <div key={p.id} className="bg-card border border-border rounded-lg hover:border-[rgba(240,165,0,0.2)] transition-colors">
               <div className="p-3 flex items-center gap-4">
                 <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-xs font-bold text-muted-foreground">{p.name.split(" ").map(n => n[0]).join("")}</div>
                 <div className="flex-1 grid grid-cols-4 gap-4">
@@ -1448,10 +2182,14 @@ function ParticipantsModule() {
                 <button onClick={() => setExpandedId(isOpen ? null : p.id)} className="flex items-center gap-1 text-[12px] font-mono text-muted-foreground hover:text-foreground px-2 py-1 rounded-md bg-secondary/60">
                   <ClipboardList size={13} />Attendance{isOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                 </button>
-                <button className="text-muted-foreground hover:text-foreground"><MoreHorizontal size={16} /></button>
+                <DropdownMenu items={[
+                  { label: "View Full Profile", icon: Eye, onClick: () => setViewProfile(p) },
+                  { label: "Message Participant", icon: Mail, onClick: () => app.addNotification({ type: "Registration", subject: `Message queued for ${p.name}`, status: "Queued" }) },
+                  { label: "Export Profile", icon: Download, onClick: () => exportRows(`dptss-profile-${p.id}`, `Participant Profile — ${p.name}`, [{ id: p.id, name: p.name, department: p.dept, role: p.role, level: p.level, status: p.status, email: p.email, phone: p.phone, employeeId: p.employeeId, joinDate: p.joinDate, certifications: p.certs.join("; "), enrolledPrograms: p.enrolled }], "csv") },
+                ]} />
               </div>
               {isOpen && (
-                <div className="border-t border-border bg-secondary/30 p-3 space-y-1.5">
+                <div className="border-t border-border bg-secondary/30 p-3 space-y-1.5 rounded-b-lg overflow-hidden">
                   {history.length === 0 ? (
                     <p className="text-[12px] text-muted-foreground px-1">No attendance records for this participant yet.</p>
                   ) : history.map(r => (

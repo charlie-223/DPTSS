@@ -11,7 +11,7 @@ import {
   FileCheck, TrendingUp as Trend, Building2, Package, UserCheck, LogIn,
   Send, Info, Check, X, Lock, LogOut, Key, Settings, ShieldCheck,
   UserPlus, UserX, RefreshCw, ToggleLeft, ToggleRight, Hash, Globe,
-  ClipboardList, Star, Award, Sun, Moon,
+  ClipboardList, Star, Award, Sun, Moon, Phone, Briefcase, MapPinned,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -41,6 +41,40 @@ const tabTransition = {
   show: { opacity: 1, x: 0, transition: { duration: 0.25 } },
   exit: { opacity: 0, x: -10, transition: { duration: 0.15 } },
 };
+
+function downloadBlob(filename: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: `${mime};charset=utf-8;` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function rowsToCSV(rows: Record<string, any>[]): string {
+  if (!rows.length) return "";
+  const keySet = new Set<string>();
+  rows.forEach(r => Object.keys(r).forEach(k => keySet.add(k)));
+  const keys: string[] = Array.from(keySet);
+  const escape = (v: any) => `"${(v ?? "").toString().replace(/"/g, '""')}"`;
+  return [keys.join(","), ...rows.map(r => keys.map(k => escape(r[k])).join(","))].join("\n");
+}
+
+function rowsToReportText(title: string, rows: Record<string, any>[]): string {
+  const generated = new Date().toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const lines = [`${title}`, `Generated: ${generated}`, `Records: ${rows.length}`, "=".repeat(48), ""];
+  rows.forEach((r, i) => {
+    lines.push(`[${i + 1}]`);
+    Object.entries(r).forEach(([k, v]) => lines.push(`  ${k}: ${v ?? "—"}`));
+    lines.push("");
+  });
+  return lines.join("\n");
+}
+
+function exportRows(filename: string, title: string, rows: Record<string, any>[], format: "csv" | "json" | "pdf") {
+  if (format === "json") { downloadBlob(`${filename}.json`, JSON.stringify(rows, null, 2), "application/json"); return; }
+  if (format === "pdf") { downloadBlob(`${filename}.txt`, rowsToReportText(title, rows), "text/plain"); return; }
+  downloadBlob(`${filename}.csv`, rowsToCSV(rows), "text/csv");
+}
 
 type Role = "user" | "admin" | "superadmin";
 type AdminModule = "dashboard" | "training" | "simulation" | "participants" | "evaluation" | "reporting";
@@ -1091,18 +1125,24 @@ function RegisterParticipantModal({ onConfirm, onCancel }: { onConfirm: (name: s
   );
 }
 
-function ExportContextModal({ type, count, onConfirm, onCancel }: { type: string; count: number; onConfirm: () => void; onCancel: () => void }) {
-  const [format, setFormat] = useState("csv");
+function ExportContextModal({ title, desc, color, rows, coreFields, filename, onExported, onCancel }: { title: string; desc: string; color: string; rows: Record<string, any>[]; coreFields?: string[]; filename: string; onExported: (format: string) => void; onCancel: () => void }) {
+  const [format, setFormat] = useState<"csv" | "json" | "pdf">("csv");
   const [includeDetails, setIncludeDetails] = useState(true);
 
-  const exportInfo: Record<string, { desc: string; color: string; fields: string[] }> = {
-    participants: { desc: "Export all registered participants and their profiles", color: "text-blue-400", fields: ["ID", "Name", "Email", "Department", "Role", "Status", "Enrollment Date"] },
-    sessions: { desc: "Export all training sessions and scheduling data", color: "text-green-400", fields: ["ID", "Course", "Date", "Location", "Trainer", "Enrolled", "Capacity"] },
-    programs: { desc: "Export all training programs and curriculum data", color: "text-orange-400", fields: ["ID", "Title", "Level", "Modules", "Duration", "Status", "Created Date"] },
-    attendance: { desc: "Export every participant's training attendance record", color: "text-primary", fields: ["ID", "Participant", "Program", "Date", "Status", "Score"] },
-  };
+  const allFields = rows.length ? Object.keys(rows[0]) : (coreFields || []);
+  const displayFields = includeDetails ? allFields : (coreFields || allFields);
+  const count = rows.length;
 
-  const info = exportInfo[type] || exportInfo.participants;
+  const handleExport = () => {
+    if (!count) return;
+    const finalRows = includeDetails ? rows : rows.map(r => {
+      const picked: Record<string, any> = {};
+      (coreFields || allFields).forEach(k => { picked[k] = r[k]; });
+      return picked;
+    });
+    exportRows(filename, title, finalRows, format);
+    onExported(format);
+  };
 
   return (
     <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -1112,22 +1152,22 @@ function ExportContextModal({ type, count, onConfirm, onCancel }: { type: string
         <div className="p-6 space-y-5">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
             <h2 className="text-lg font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">EXPORT DATA</h2>
-            <p className="text-xs text-muted-foreground mt-1">{info.desc}</p>
+            <p className="text-xs text-muted-foreground mt-1">{desc}</p>
           </motion.div>
 
-          <div className="p-3 rounded-lg bg-secondary/50 border border-border"><div className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2">Export Summary</div><div className="flex justify-between items-center"><span className="text-sm font-semibold text-foreground">{type.charAt(0).toUpperCase() + type.slice(1)}</span><span className="text-lg font-bold text-primary">{count}</span></div><div className="text-[12px] text-muted-foreground mt-2">{count} record{count !== 1 ? "s" : ""} will be exported</div></div>
+          <div className="p-3 rounded-lg bg-secondary/50 border border-border"><div className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2">Export Summary</div><div className="flex justify-between items-center"><span className="text-sm font-semibold text-foreground">{title}</span><span className={`text-lg font-bold ${color}`}>{count}</span></div><div className="text-[12px] text-muted-foreground mt-2">{count ? `${count} record${count !== 1 ? "s" : ""} will be exported` : "No records currently available to export."}</div></div>
 
           <div className="space-y-3">
-            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Export Format</label><div className="flex gap-2">{[{ id: "csv", label: "CSV", desc: "Spreadsheet compatible" }, { id: "json", label: "JSON", desc: "Data interchange format" }, { id: "pdf", label: "PDF", desc: "Report document" }].map(f => <button key={f.id} onClick={() => setFormat(f.id)} className={`flex-1 p-2 rounded-md border transition-colors ${format === f.id ? "bg-primary/20 border-primary text-primary" : "bg-secondary border-border text-muted-foreground hover:border-primary/50"}`}><div className="text-xs font-semibold">{f.label}</div><div className="text-[12px] text-muted-foreground">{f.desc}</div></button>)}</div></div>
+            <div><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-2">Export Format</label><div className="flex gap-2">{[{ id: "csv", label: "CSV", desc: "Spreadsheet compatible" }, { id: "json", label: "JSON", desc: "Data interchange format" }, { id: "pdf", label: "PDF", desc: "Formatted report" }].map(f => <button key={f.id} onClick={() => setFormat(f.id as any)} className={`flex-1 p-2 rounded-md border transition-colors ${format === f.id ? "bg-primary/20 border-primary text-primary" : "bg-secondary border-border text-muted-foreground hover:border-primary/50"}`}><div className="text-xs font-semibold">{f.label}</div><div className="text-[12px] text-muted-foreground">{f.desc}</div></button>)}</div></div>
 
-            <label className="flex items-center gap-2 p-2 rounded-md bg-secondary/30 cursor-pointer hover:bg-secondary/50 transition-colors"><input type="checkbox" checked={includeDetails} onChange={e => setIncludeDetails(e.target.checked)} className="w-4 h-4" /><span className="text-xs text-foreground flex-1">Include detailed information & metadata</span></label>
+            <label className="flex items-center gap-2 p-2 rounded-md bg-secondary/30 cursor-pointer hover:bg-secondary/50 transition-colors"><input type="checkbox" checked={includeDetails} onChange={e => setIncludeDetails(e.target.checked)} className="w-4 h-4" /><span className="text-xs text-foreground flex-1">Include detailed information & metadata (all fields)</span></label>
           </div>
 
-          <div className="p-3 rounded-lg bg-secondary/30 border border-border"><div className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2">Fields Included</div><div className="flex flex-wrap gap-1">{info.fields.map(f => <span key={f} className="text-[12px] font-mono px-2 py-1 rounded bg-primary/10 border border-primary/20 text-primary">{f}</span>)}</div></div>
+          <div className="p-3 rounded-lg bg-secondary/30 border border-border"><div className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2">Fields Included ({displayFields.length})</div><div className="flex flex-wrap gap-1">{displayFields.map(f => <span key={f} className="text-[12px] font-mono px-2 py-1 rounded bg-primary/10 border border-primary/20 text-primary">{f}</span>)}</div></div>
 
           <div className="flex gap-2.5 pt-2">
             <button onClick={onCancel} className="flex-1 px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors">Cancel</button>
-            <button onClick={onConfirm} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"><Download size={16} />Export {count} Records</button>
+            <button onClick={handleExport} disabled={!count} className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors ${count ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-secondary text-muted-foreground cursor-not-allowed"}`}><Download size={16} />Export {count} Record{count !== 1 ? "s" : ""}</button>
           </div>
         </div>
       </motion.div>
@@ -1139,7 +1179,7 @@ function TrainingModule() {
   const [tab, setTab] = useState<TrainingTab>("curriculum");
   const [showNewProgram, setShowNewProgram] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
-  const [exportType, setExportType] = useState<"programs" | "sessions">("programs");
+  const [exportType, setExportType] = useState<"programs" | "sessions" | "resources">("programs");
   const courses = [
     { id: "CRS-001", title: "Basic Earthquake Response", level: "Basic", modules: 5, duration: "4 hrs", status: "Active" },
     { id: "CRS-002", title: "Advanced Flood Evacuation Protocols", level: "Advanced", modules: 8, duration: "6 hrs", status: "Active" },
@@ -1148,9 +1188,9 @@ function TrainingModule() {
     { id: "CRS-005", title: "Mass Casualty Incident Management", level: "Intermediate", modules: 7, duration: "8 hrs", status: "Active" },
   ];
   const sessions = [
-    { id: "SES-001", course: "Basic Earthquake Response", date: "Jul 03", time: "08:00–12:00", location: "District 4 EOC", trainer: "Maj. Reyes", enrolled: 42, capacity: 60 },
-    { id: "SES-002", course: "Advanced Flood Evacuation", date: "Jul 08", time: "09:00–15:00", location: "Virtual — MS Teams", trainer: "Capt. Santos", enrolled: 89, capacity: 100 },
-    { id: "SES-003", course: "Hazmat Level 2", date: "Jul 10", time: "07:00–19:00", location: "Industrial Zone Fac.", trainer: "Dr. Villanueva", enrolled: 17, capacity: 30 },
+    { id: "SES-001", course: "Basic Earthquake Response", date: "Jul 03", time: "08:00–12:00", location: "District 4 EOC", trainer: "Maj. Reyes", enrolled: 42, capacity: 60, status: "Scheduled" },
+    { id: "SES-002", course: "Advanced Flood Evacuation", date: "Jul 08", time: "09:00–15:00", location: "Virtual — MS Teams", trainer: "Capt. Santos", enrolled: 89, capacity: 100, status: "Scheduled" },
+    { id: "SES-003", course: "Hazmat Level 2", date: "Jul 10", time: "07:00–19:00", location: "Industrial Zone Fac.", trainer: "Dr. Villanueva", enrolled: 17, capacity: 30, status: "Scheduled" },
   ];
   const resources = [
     { name: "Maj. Reyes", type: "Trainer", spec: "Seismic Response", available: true },
@@ -1160,6 +1200,16 @@ function TrainingModule() {
     { name: "District 4 EOC", type: "Venue", spec: "Multi-purpose", available: true },
   ];
   const app = useApp();
+
+  const allPrograms = [...courses.map(c => ({ ...c, source: "Seed Catalog" })), ...app.programs.map(p => ({ ...p, source: "Admin-Added" }))];
+  const allSessions = [...sessions.map(s => ({ ...s, source: "Seed Catalog" })), ...app.sessions.map(s => ({ ...s, status: s.status || "Scheduled", source: "Admin-Added" }))];
+  const resourceRows = resources.map((r, i) => ({ id: `RES-${String(i + 1).padStart(3, "0")}`, name: r.name, type: r.type, specialization: r.spec, availability: r.available ? "Available" : "Committed" }));
+
+  const exportConfig = {
+    programs: { title: "Training Programs", desc: "Export all training programs and curriculum data, including newly created programs.", color: "text-orange-400", rows: allPrograms, coreFields: ["id", "title", "level", "modules", "duration", "status"] },
+    sessions: { title: "Training Sessions", desc: "Export all scheduled training sessions, including newly scheduled sessions.", color: "text-green-400", rows: allSessions, coreFields: ["id", "course", "date", "location", "trainer", "enrolled", "capacity", "status"] },
+    resources: { title: "Resource Allocation", desc: "Export trainer, equipment, and venue resource allocation data.", color: "text-purple-400", rows: resourceRows, coreFields: ["id", "name", "type", "specialization", "availability"] },
+  }[exportType];
 
   return (
     <div className="space-y-5">
@@ -1175,10 +1225,14 @@ function TrainingModule() {
       )}
       {showExportModal && (
         <ExportContextModal
-          type={exportType}
-          count={exportType === "programs" ? courses.length : sessions.length}
-          onConfirm={() => {
-            app.exportCSV(exportType);
+          title={exportConfig.title}
+          desc={exportConfig.desc}
+          color={exportConfig.color}
+          rows={exportConfig.rows}
+          coreFields={exportConfig.coreFields}
+          filename={`dptss-${exportType}-${new Date().toISOString().slice(0, 10)}`}
+          onExported={(format) => {
+            app.addNotification({ type: "Export", subject: `Exported ${exportConfig.title} (${format.toUpperCase()})`, status: "Sent" });
             setShowExportModal(false);
           }}
           onCancel={() => setShowExportModal(false)}
@@ -1188,7 +1242,7 @@ function TrainingModule() {
         <div><h1 className="text-4xl font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">TRAINING PROGRAM MANAGEMENT</h1><p className="text-muted-foreground text-base mt-0.5">Curriculum · scheduling · resource allocation</p></div>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowNewProgram(true)} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-base font-semibold hover:bg-primary/90 transition-colors"><Plus size={16} />New Program</button>
-          <button onClick={() => { setExportType("programs"); setShowExportModal(true); }} className="flex items-center gap-2 bg-secondary text-muted-foreground px-3 py-2 rounded-md text-base font-semibold hover:bg-secondary/90 transition-colors"><Download size={16} />Export</button>
+          <button onClick={() => { setExportType(tab === "curriculum" ? "programs" : tab === "schedule" ? "sessions" : "resources"); setShowExportModal(true); }} className="flex items-center gap-2 bg-secondary text-muted-foreground px-3 py-2 rounded-md text-base font-semibold hover:bg-secondary/90 transition-colors"><Download size={16} />Export</button>
         </div>
       </div>
       <TabBar tabs={[{ id: "curriculum", label: "Curriculum Builder", icon: BookMarked }, { id: "schedule", label: "Scheduling", icon: Calendar }, { id: "resources", label: "Resource Allocation", icon: Package }]} active={tab} onChange={v => setTab(v as TrainingTab)} />
@@ -1330,6 +1384,17 @@ function ParticipantsModule() {
     { id: "P-004", name: "Carlos Bautista", dept: "Supply Delta", role: "Logistics", level: "Basic", certs: ["First Aid"], status: "Pending", enrolled: 1 },
     { id: "P-005", name: "Elena Villanueva", dept: "Hazmat Echo", role: "Hazmat Specialist", level: "Advanced", certs: ["HAZMAT-OPS", "SCBA"], status: "Active", enrolled: 5 },
   ];
+
+  const allParticipants = [
+    ...participants.map(p => ({ id: p.id, name: p.name, department: p.dept, role: p.role, level: p.level, certifications: p.certs.join("; "), status: p.status, enrolledPrograms: p.enrolled, source: "Seed Roster" })),
+    ...app.participants.map(p => ({ id: p.id, name: p.name, department: p.dept || "—", role: p.role || "—", level: p.level || "—", certifications: "—", status: p.status || "Pending", enrolledPrograms: 0, source: "Self-Registered" })),
+  ];
+  const allAttendance = app.attendanceRecords.map(r => ({ id: r.id, participant: r.participantName, program: r.program, date: r.date, status: r.status, score: r.score ?? "—", certificate: r.certificate ?? "—" }));
+
+  const exportConfig = tab === "attendance"
+    ? { title: "Attendance Records", desc: "Export every participant's training attendance record, including scores and certificates.", color: "text-primary", rows: allAttendance, coreFields: ["id", "participant", "program", "date", "status", "score"] }
+    : { title: "Participant Profiles", desc: "Export all registered participants and their complete profiles, including self-registered accounts.", color: "text-blue-400", rows: allParticipants, coreFields: ["id", "name", "department", "role", "level", "status"] };
+
   return (
     <div className="space-y-5">
       {showRegisterModal && (
@@ -1344,10 +1409,14 @@ function ParticipantsModule() {
       )}
       {showExportModal && (
         <ExportContextModal
-          type={tab === "attendance" ? "attendance" : "participants"}
-          count={tab === "attendance" ? app.attendanceRecords.length : participants.length}
-          onConfirm={() => {
-            app.exportCSV(tab === "attendance" ? "attendance" : "participants");
+          title={exportConfig.title}
+          desc={exportConfig.desc}
+          color={exportConfig.color}
+          rows={exportConfig.rows}
+          coreFields={exportConfig.coreFields}
+          filename={`dptss-${tab === "attendance" ? "attendance" : "participants"}-${new Date().toISOString().slice(0, 10)}`}
+          onExported={(format) => {
+            app.addNotification({ type: "Export", subject: `Exported ${exportConfig.title} (${format.toUpperCase()})`, status: "Sent" });
             setShowExportModal(false);
           }}
           onCancel={() => setShowExportModal(false)}
@@ -1487,17 +1556,48 @@ function EvalModule() {
 }
 
 function ReportModule() {
+  const app = useApp();
   const [tab, setTab] = useState<ReportTab>("aar");
+  const [showExportModal, setShowExportModal] = useState(false);
   const compliance = [
     { name: "Fire Safety", score: 94, target: 90, status: "Passed" }, { name: "Earthquake Protocol", score: 82, target: 85, status: "Failed" },
     { name: "Flood Evacuation", score: 91, target: 90, status: "Passed" }, { name: "Hazmat Response", score: 88, target: 85, status: "Passed" },
     { name: "Mass Casualty", score: 79, target: 80, status: "Failed" }, { name: "Communications", score: 96, target: 90, status: "Passed" },
   ];
+  const aarStrengths = ["Rapid medical deployment — triage in 4:31 (target: 5 min)", "Communications protocols maintained throughout all phases", "Gas valve shutoff avg 1:52 across all teams"];
+  const aarGaps = ["Evacuation signage inadequate in Sector C — avg time 6:12 vs 5:00 target", "Accountability check missed by 4 teams within 10-minute limit", "Equipment cache access delayed 3–5 min by procedural bottleneck"];
+  const aarRecs = [{ p: "Critical", t: "Update Sector C maps and install additional signage" }, { p: "High", t: "Streamline cache retrieval — pre-position equipment" }, { p: "Medium", t: "ICS refresher for 4 newly assigned team leads" }];
+
+  const aarRow = [{ reportId: "RPT-2026-018", title: "Earthquake Response — Advanced", date: "Jun 28, 2026", location: "District 4 EOC", participants: 42, status: "Completed", strengths: aarStrengths.join(" | "), gaps: aarGaps.join(" | "), recommendations: aarRecs.map(r => `[${r.p}] ${r.t}`).join(" | ") }];
+  const complianceRows = compliance.map(c => ({ category: c.name, score: `${c.score}%`, target: `${c.target}%`, status: c.status, margin: `${(c.score - c.target).toFixed(0)}pts` }));
+  const trendRows = trendHistory.map((t: any) => ({ drill: t.drill, avgScore: t.avgScore, passRate: t.passRate }));
+
+  const exportConfig = tab === "aar"
+    ? { title: "After-Action Report", desc: "Export the full after-action report including strengths, gaps, and recommendations.", color: "text-primary", rows: aarRow, coreFields: ["reportId", "title", "date", "location", "participants", "status"] }
+    : tab === "compliance"
+    ? { title: "Compliance Analytics", desc: "Export compliance scores against targets for every drill category.", color: "text-green-400", rows: complianceRows, coreFields: ["category", "score", "target", "status"] }
+    : { title: "Trend Analysis", desc: "Export historical score and pass-rate trend data across drills.", color: "text-blue-400", rows: trendRows, coreFields: ["drill", "avgScore", "passRate"] };
+
   return (
     <div className="space-y-5">
+      {showExportModal && (
+        <ExportContextModal
+          title={exportConfig.title}
+          desc={exportConfig.desc}
+          color={exportConfig.color}
+          rows={exportConfig.rows}
+          coreFields={exportConfig.coreFields}
+          filename={`dptss-${tab}-report-${new Date().toISOString().slice(0, 10)}`}
+          onExported={(format) => {
+            app.addNotification({ type: "Export", subject: `Exported ${exportConfig.title} (${format.toUpperCase()})`, status: "Sent" });
+            setShowExportModal(false);
+          }}
+          onCancel={() => setShowExportModal(false)}
+        />
+      )}
       <div className="flex items-center justify-between">
         <div><h1 className="text-2xl font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">DISASTER DRILL REPORTING</h1><p className="text-muted-foreground text-sm mt-0.5">After-action reports · compliance · trend analysis</p></div>
-        <button className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-semibold hover:bg-primary/90"><Download size={16} />Export</button>
+        <button onClick={() => setShowExportModal(true)} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-semibold hover:bg-primary/90"><Download size={16} />Export</button>
       </div>
       <TabBar tabs={[{ id: "aar", label: "After-Action Report", icon: FileCheck }, { id: "compliance", label: "Compliance Analytics", icon: Shield }, { id: "trends", label: "Trend Analysis", icon: Trend }]} active={tab} onChange={v => setTab(v as ReportTab)} />
       {tab === "aar" && (
@@ -1526,36 +1626,263 @@ function ReportModule() {
   );
 }
 
-type ManagedUser = { id: string; name: string; email: string; role: Role; dept: string; status: "Active" | "Suspended"; lastLogin: string; avatar: string };
+type ManagedUser = {
+  id: string;
+  employeeId: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: Role;
+  dept: string;
+  title: string;
+  location: string;
+  status: "Active" | "Suspended";
+  joinDate: string;
+  lastLogin: string;
+  avatar: string;
+  certifications: string[];
+  notes: string;
+};
+
+const ROLE_PERMISSIONS: Record<Role, string[]> = {
+  superadmin: ["Full system access", "Manage users & roles", "System settings & config", "Data export (all modules)", "Audit log access"],
+  admin: ["Manage training programs", "Manage participants", "Launch scenarios & drills", "View & export reports"],
+  user: ["View assigned trainings", "Submit self-evaluations", "View own certificates & attendance"],
+};
 
 const initialUsers: ManagedUser[] = [
-  { id: "USR-001", name: "Director Reyes", email: "superadmin@ems.gov", role: "superadmin", dept: "Command HQ", status: "Active", lastLogin: "Jun 30, 09:01", avatar: "DR" },
-  { id: "USR-002", name: "Capt. Santos", email: "admin@ems.gov", role: "admin", dept: "Training Division", status: "Active", lastLogin: "Jun 30, 08:45", avatar: "CS" },
-  { id: "USR-003", name: "Lt. Cruz", email: "lcruz@ems.gov", role: "admin", dept: "Operations", status: "Active", lastLogin: "Jun 29, 14:30", avatar: "LC" },
-  { id: "USR-004", name: "Maria Santos", email: "m.santos@ems.gov", role: "user", dept: "Rescue Alpha", status: "Active", lastLogin: "Jun 30, 08:12", avatar: "MS" },
-  { id: "USR-005", name: "Jose Reyes", email: "j.reyes@ems.gov", role: "user", dept: "Medical Bravo", status: "Active", lastLogin: "Jun 29, 16:02", avatar: "JR" },
-  { id: "USR-006", name: "Ana Cruz", email: "a.cruz@ems.gov", role: "user", dept: "Command HQ", status: "Active", lastLogin: "Jun 29, 11:55", avatar: "AC" },
-  { id: "USR-007", name: "Carlos Bautista", email: "c.bautista@ems.gov", role: "user", dept: "Supply Delta", status: "Suspended", lastLogin: "Jun 20, 09:00", avatar: "CB" },
-  { id: "USR-008", name: "Elena Villanueva", email: "e.villanueva@ems.gov", role: "user", dept: "Hazmat Echo", status: "Active", lastLogin: "Jun 30, 07:58", avatar: "EV" },
+  { id: "USR-001", employeeId: "EMS-00114", name: "Director Reyes", email: "superadmin@ems.gov", phone: "+63 917 200 1141", role: "superadmin", dept: "Command HQ", title: "Executive Director", location: "Central Command, Quezon City", status: "Active", joinDate: "2019-03-11", lastLogin: "Jun 30, 09:01", avatar: "DR", certifications: ["ICS-400 Advanced Command", "Emergency Management Professional (CEM)", "HAZMAT Awareness"], notes: "Platform owner. Oversees all divisions and system configuration." },
+  { id: "USR-002", employeeId: "EMS-00227", name: "Capt. Santos", email: "admin@ems.gov", phone: "+63 917 200 2278", role: "admin", dept: "Training Division", title: "Training Division Captain", location: "Field Station 2, Quezon City", status: "Active", joinDate: "2020-07-02", lastLogin: "Jun 30, 08:45", avatar: "CS", certifications: ["ICS-300 Intermediate Command", "Master Training Specialist", "CPR/AED Instructor"], notes: "Manages curriculum design and scenario builder content." },
+  { id: "USR-003", employeeId: "EMS-00341", name: "Lt. Cruz", email: "lcruz@ems.gov", phone: "+63 917 200 3419", role: "admin", dept: "Operations", title: "Operations Lieutenant", location: "Central Command, Quezon City", status: "Active", joinDate: "2021-01-19", lastLogin: "Jun 29, 14:30", avatar: "LC", certifications: ["ICS-300 Intermediate Command", "Search & Rescue Team Leader"], notes: "Coordinates field deployments and drill reporting." },
+  { id: "USR-004", employeeId: "EMS-01052", name: "Maria Santos", email: "m.santos@ems.gov", phone: "+63 917 200 5104", role: "user", dept: "Rescue Alpha", title: "Rescue Technician", location: "Field Station 1, Quezon City", status: "Active", joinDate: "2022-05-14", lastLogin: "Jun 30, 08:12", avatar: "MS", certifications: ["Earthquake Response", "Flood Evacuation Protocol", "Hazmat Level 1"], notes: "Top performer across recent earthquake and flood drills." },
+  { id: "USR-005", employeeId: "EMS-01087", name: "Jose Reyes", email: "j.reyes@ems.gov", phone: "+63 917 200 5871", role: "user", dept: "Medical Bravo", title: "EMT-Paramedic", location: "Field Station 2, Quezon City", status: "Active", joinDate: "2022-09-30", lastLogin: "Jun 29, 16:02", avatar: "JR", certifications: ["Wildfire Response Drill", "CPR Recertification"], notes: "Due for CPR recertification renewal next quarter." },
+  { id: "USR-006", employeeId: "EMS-01123", name: "Ana Cruz", email: "a.cruz@ems.gov", phone: "+63 917 200 1236", role: "user", dept: "Command HQ", title: "Logistics Coordinator", location: "Central Command, Quezon City", status: "Active", joinDate: "2023-02-08", lastLogin: "Jun 29, 11:55", avatar: "AC", certifications: ["ICS-200 Command Structure", "Earthquake Response"], notes: "Handles supply coordination during command-level exercises." },
+  { id: "USR-007", employeeId: "EMS-00998", name: "Carlos Bautista", email: "c.bautista@ems.gov", phone: "+63 917 200 9982", role: "user", dept: "Supply Delta", title: "Logistics Officer", location: "Warehouse Depot, Quezon City", status: "Suspended", joinDate: "2021-11-22", lastLogin: "Jun 20, 09:00", avatar: "CB", certifications: ["Basic First Aid"], notes: "Suspended pending review — missed Basic First Aid drill without notice." },
+  { id: "USR-008", employeeId: "EMS-01201", name: "Elena Villanueva", email: "e.villanueva@ems.gov", phone: "+63 917 200 2011", role: "user", dept: "Hazmat Echo", title: "Hazmat Specialist", location: "Field Station 3, Quezon City", status: "Active", joinDate: "2023-06-19", lastLogin: "Jun 30, 07:58", avatar: "EV", certifications: ["Hazmat Level 2", "SCBA Field Operations"], notes: "Currently completing Hazmat Level 2 certification track." },
 ];
+
+function UserDetailModal({ user, onClose, onToggleStatus, onChangeRole }: { user: ManagedUser; onClose: () => void; onToggleStatus: (id: string) => void; onChangeRole: (id: string, role: Role) => void }) {
+  const app = useApp();
+  const roleColors: Record<Role, string> = {
+    superadmin: "bg-primary/20 text-primary border-primary/30",
+    admin: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+    user: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  };
+  const roleLabels: Record<Role, string> = { superadmin: "Super Admin", admin: "Admin", user: "User" };
+  const attendance = app.getAttendanceFor(user.name);
+
+  return (
+    <AnimatePresence>
+      <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+        <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onClose} />
+        <motion.div
+          className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[88vh] overflow-hidden flex flex-col"
+          initial={{ opacity: 0, scale: 0.94, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }}
+          transition={{ duration: 0.22, ease: [0.25, 0.46, 0.45, 0.94] }}
+        >
+          <div className="h-1 w-full bg-gradient-to-r from-primary via-primary/60 to-transparent flex-shrink-0" />
+
+          <div className="p-6 flex items-start justify-between gap-4 border-b border-border flex-shrink-0">
+            <div className="flex items-center gap-3.5">
+              <AvatarCircle initials={user.avatar} color={user.role === "superadmin" ? "bg-primary/20" : user.role === "admin" ? "bg-purple-500/20" : "bg-blue-500/20"} />
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">{user.name}</h2>
+                  <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded border ${roleColors[user.role]}`}>{roleLabels[user.role]}</span>
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5">{user.title} · {user.dept}</div>
+                <div className="text-[11px] font-mono text-muted-foreground mt-0.5">{user.id} · {user.employeeId}</div>
+              </div>
+            </div>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-secondary flex-shrink-0"><X size={18} /></button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6 space-y-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <div className="flex items-center gap-2">
+              <Badge status={user.status}>{user.status}</Badge>
+              <span className="text-[12px] font-mono text-muted-foreground">Last login: {user.lastLogin}</span>
+            </div>
+
+            <div>
+              <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2.5">Contact Information</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex items-center gap-2.5 bg-secondary/40 rounded-md p-2.5"><Mail size={14} className="text-muted-foreground flex-shrink-0" /><span className="text-xs font-mono text-foreground truncate">{user.email}</span></div>
+                <div className="flex items-center gap-2.5 bg-secondary/40 rounded-md p-2.5"><Phone size={14} className="text-muted-foreground flex-shrink-0" /><span className="text-xs font-mono text-foreground">{user.phone}</span></div>
+                <div className="flex items-center gap-2.5 bg-secondary/40 rounded-md p-2.5"><Briefcase size={14} className="text-muted-foreground flex-shrink-0" /><span className="text-xs text-foreground">{user.dept}</span></div>
+                <div className="flex items-center gap-2.5 bg-secondary/40 rounded-md p-2.5"><MapPinned size={14} className="text-muted-foreground flex-shrink-0" /><span className="text-xs text-foreground truncate">{user.location}</span></div>
+                <div className="flex items-center gap-2.5 bg-secondary/40 rounded-md p-2.5"><Calendar size={14} className="text-muted-foreground flex-shrink-0" /><span className="text-xs text-foreground">Joined {user.joinDate}</span></div>
+                <div className="flex items-center gap-2.5 bg-secondary/40 rounded-md p-2.5"><Hash size={14} className="text-muted-foreground flex-shrink-0" /><span className="text-xs font-mono text-foreground">{user.employeeId}</span></div>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2.5">Role & Permissions</h3>
+              <div className="bg-secondary/40 rounded-md p-3 space-y-1.5">
+                {ROLE_PERMISSIONS[user.role].map(p => (
+                  <div key={p} className="flex items-center gap-2 text-xs text-foreground"><CheckCircle size={13} className="text-accent flex-shrink-0" />{p}</div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2.5">Certifications</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {user.certifications.length ? user.certifications.map(c => (
+                  <span key={c} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20"><Award size={12} />{c}</span>
+                )) : <span className="text-xs text-muted-foreground">No certifications on record.</span>}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2.5">Training Attendance History</h3>
+              {attendance.length ? (
+                <div className="bg-secondary/40 rounded-md overflow-hidden divide-y divide-border">
+                  {attendance.map(r => (
+                    <div key={r.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-foreground truncate">{r.program}</div>
+                        <div className="text-[11px] font-mono text-muted-foreground">{r.date}{r.certificate ? ` · ${r.certificate}` : ""}</div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {typeof r.score === "number" && <span className="text-[11px] font-mono text-muted-foreground">{r.score}%</span>}
+                        <Badge status={r.status}>{r.status}</Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="text-xs text-muted-foreground">No attendance records found for this user.</p>}
+            </div>
+
+            {user.notes && (
+              <div>
+                <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2.5">Notes</h3>
+                <p className="text-xs text-muted-foreground bg-secondary/40 rounded-md p-3 leading-relaxed">{user.notes}</p>
+              </div>
+            )}
+          </div>
+
+          <div className="p-4 border-t border-border flex items-center justify-end gap-2 flex-shrink-0 bg-card">
+            <button onClick={() => onToggleStatus(user.id)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold transition-colors ${user.status === "Active" ? "bg-red-500/10 text-red-400 hover:bg-red-500/20" : "bg-green-500/10 text-green-400 hover:bg-green-500/20"}`}>
+              {user.status === "Active" ? <UserX size={14} /> : <UserCheck size={14} />}
+              {user.status === "Active" ? "Suspend Account" : "Reactivate Account"}
+            </button>
+            <select value={user.role} onChange={e => onChangeRole(user.id, e.target.value as Role)}
+              className="bg-input-background border border-border rounded-md px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary">
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+              <option value="superadmin">Super Admin</option>
+            </select>
+            <button onClick={onClose} className="px-3 py-2 rounded-md text-xs font-semibold bg-secondary text-foreground hover:bg-secondary/80 transition-colors">Close</button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+function AddUserModal({ onClose, onCreate }: { onClose: () => void; onCreate: (u: ManagedUser) => void }) {
+  const [form, setForm] = useState({ name: "", email: "", phone: "", role: "user" as Role, dept: "", title: "", location: "" });
+  const canSubmit = form.name.trim() && form.email.trim();
+
+  const submit = () => {
+    if (!canSubmit) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const newUser: ManagedUser = {
+      id: `USR-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+      employeeId: `EMS-${Math.floor(1000 + Math.random() * 9000)}`,
+      name: form.name, email: form.email, phone: form.phone || "—",
+      role: form.role, dept: form.dept || "General", title: form.title || "—",
+      location: form.location || "—", status: "Active", joinDate: today, lastLogin: "—",
+      avatar: form.name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase(),
+      certifications: [], notes: "",
+    };
+    onCreate(newUser);
+  };
+
+  const Field = ({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) => (
+    <div>
+      <label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">{label}</label>
+      <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        className="w-full mt-1 bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+    </div>
+  );
+
+  return (
+    <AnimatePresence>
+      <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+        <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onClose} />
+        <motion.div
+          className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-md overflow-hidden"
+          initial={{ opacity: 0, scale: 0.94, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }}
+          transition={{ duration: 0.22, ease: [0.25, 0.46, 0.45, 0.94] }}
+        >
+          <div className="h-1 w-full bg-gradient-to-r from-primary via-primary/60 to-transparent" />
+          <div className="p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">ADD NEW USER</h2>
+              <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-secondary"><X size={18} /></button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2"><Field label="Full Name" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} placeholder="e.g. Maria Santos" /></div>
+              <div className="col-span-2"><Field label="Email" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="name@ems.gov" /></div>
+              <Field label="Phone" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} placeholder="+63 917 000 0000" />
+              <div>
+                <label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Role</label>
+                <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as Role }))}
+                  className="w-full mt-1 bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary">
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                  <option value="superadmin">Super Admin</option>
+                </select>
+              </div>
+              <Field label="Job Title" value={form.title} onChange={v => setForm(f => ({ ...f, title: v }))} placeholder="e.g. Rescue Technician" />
+              <Field label="Department" value={form.dept} onChange={v => setForm(f => ({ ...f, dept: v }))} placeholder="e.g. Rescue Alpha" />
+              <div className="col-span-2"><Field label="Duty Location" value={form.location} onChange={v => setForm(f => ({ ...f, location: v }))} placeholder="e.g. Field Station 1, Quezon City" /></div>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button onClick={onClose} className="px-3 py-2 rounded-md text-xs font-semibold bg-secondary text-foreground hover:bg-secondary/80 transition-colors">Cancel</button>
+              <motion.button onClick={submit} disabled={!canSubmit} whileHover={canSubmit ? { scale: 1.03 } : {}} whileTap={canSubmit ? { scale: 0.97 } : {}}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-semibold transition-colors ${canSubmit ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-secondary text-muted-foreground cursor-not-allowed"}`}>
+                <UserPlus size={14} />Create User
+              </motion.button>
+            </div>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
 
 function UserManagement() {
   const app = useApp();
   const [users, setUsers] = useState<ManagedUser[]>(initialUsers);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | Role>("all");
-  const [editId, setEditId] = useState<string | null>(null);
+  const [detailUser, setDetailUser] = useState<ManagedUser | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
 
   const filtered = users.filter(u =>
     (filter === "all" || u.role === filter) &&
-    (u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()))
+    (u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()) || u.dept.toLowerCase().includes(search.toLowerCase()))
   );
 
-  const toggleStatus = (id: string) =>
+  const toggleStatus = (id: string) => {
     setUsers(prev => prev.map(u => u.id === id ? { ...u, status: u.status === "Active" ? "Suspended" : "Active" } : u));
+    setDetailUser(prev => prev && prev.id === id ? { ...prev, status: prev.status === "Active" ? "Suspended" : "Active" } : prev);
+  };
 
-  const changeRole = (id: string, role: Role) =>
+  const changeRole = (id: string, role: Role) => {
     setUsers(prev => prev.map(u => u.id === id ? { ...u, role } : u));
+    setDetailUser(prev => prev && prev.id === id ? { ...prev, role } : prev);
+  };
+
+  const createUser = (u: ManagedUser) => {
+    setUsers(prev => [u, ...prev]);
+    app.addUser({ id: "", name: u.name, email: u.email, dept: u.dept, role: u.role, status: "Active" });
+    app.addNotification({ type: "UserMgmt", subject: `User added: ${u.name}`, status: "Sent" });
+    setShowAddModal(false);
+  };
 
   const roleColors: Record<Role, string> = {
     superadmin: "bg-primary/20 text-primary border-primary/30",
@@ -1571,16 +1898,8 @@ function UserManagement() {
           <h1 className="text-2xl font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">USER MANAGEMENT</h1>
           <p className="text-muted-foreground text-sm mt-0.5">Manage accounts, roles, and access permissions across the platform</p>
         </div>
-        <motion.button onClick={() => {
-          const name = prompt("Name:"); if (!name) return;
-          const email = prompt("Email:", "") || "";
-          const role = (prompt("Role (user/admin/superadmin):", "user") as Role) || "user";
-          const dept = prompt("Department:", "General") || "General";
-          const newUser: ManagedUser = { id: `USR-${Math.random().toString(36).slice(2,6).toUpperCase()}`, name, email, role, dept, status: "Active", lastLogin: "—", avatar: name.split(" ").map(n => n[0]).slice(0,2).join("") };
-          setUsers(prev => [newUser, ...prev]);
-          app.addUser({ id: "", name, email, dept, role, status: "Active" });
-          app.addNotification({ type: "UserMgmt", subject: `User added: ${name}`, status: "Sent" });
-        }} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-semibold hover:bg-primary/90 transition-colors"><UserPlus size={16} />Add User</motion.button>
+        <motion.button onClick={() => setShowAddModal(true)} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+          className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-semibold hover:bg-primary/90 transition-colors"><UserPlus size={16} />Add User</motion.button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1603,7 +1922,7 @@ function UserManagement() {
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-xs">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search users..."
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, email, department..."
             className="w-full bg-input-background border border-border rounded-md pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
         <div className="flex gap-1.5">
@@ -1620,7 +1939,7 @@ function UserManagement() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-secondary/40">
-              {["User", "Email", "Role", "Department", "Status", "Last Login", "Actions"].map(h => (
+              {["User", "Contact", "Role", "Department", "Status", "Last Login", "Actions"].map(h => (
                 <th key={h} className="text-left text-[12px] font-mono font-medium text-muted-foreground uppercase tracking-widest px-4 py-3">{h}</th>
               ))}
             </tr>
@@ -1628,67 +1947,219 @@ function UserManagement() {
           <tbody>
             {filtered.map((u, i) => (
               <motion.tr key={u.id} custom={i} variants={fadeIn} initial="hidden" animate="show"
-                className={`border-b border-border hover:bg-secondary/30 transition-colors ${i === filtered.length - 1 ? "border-b-0" : ""} ${u.status === "Suspended" ? "opacity-60" : ""}`}>
+                onClick={() => setDetailUser(u)}
+                className={`border-b border-border hover:bg-secondary/30 transition-colors cursor-pointer ${i === filtered.length - 1 ? "border-b-0" : ""} ${u.status === "Suspended" ? "opacity-60" : ""}`}>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2.5">
                     <AvatarCircle initials={u.avatar} color={u.role === "superadmin" ? "bg-primary/20" : u.role === "admin" ? "bg-purple-500/20" : "bg-blue-500/20"} />
-                    <div>
-                      <div className="text-xs font-semibold text-foreground">{u.name}</div>
-                      <div className="text-[11px] font-mono text-muted-foreground">{u.id}</div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-foreground truncate">{u.name}</div>
+                      <div className="text-[11px] font-mono text-muted-foreground">{u.id} · {u.title}</div>
                     </div>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-xs font-mono text-muted-foreground">{u.email}</td>
                 <td className="px-4 py-3">
-                  {editId === u.id ? (
-                    <select value={u.role} onChange={e => { changeRole(u.id, e.target.value as Role); setEditId(null); }}
-                      className="bg-input-background border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary">
-                      <option value="user">User</option>
-                      <option value="admin">Admin</option>
-                      <option value="superadmin">Super Admin</option>
-                    </select>
-                  ) : (
-                    <span className={`text-[12px] font-mono font-bold px-2 py-0.5 rounded border ${roleColors[u.role]}`}>{roleLabels[u.role]}</span>
-                  )}
+                  <div className="text-xs font-mono text-muted-foreground">{u.email}</div>
+                  <div className="text-[11px] font-mono text-muted-foreground">{u.phone}</div>
+                </td>
+                <td className="px-4 py-3">
+                  <span className={`text-[12px] font-mono font-bold px-2 py-0.5 rounded border ${roleColors[u.role]}`}>{roleLabels[u.role]}</span>
                 </td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">{u.dept}</td>
                 <td className="px-4 py-3"><Badge status={u.status}>{u.status}</Badge></td>
                 <td className="px-4 py-3 text-xs font-mono text-muted-foreground">{u.lastLogin}</td>
                 <td className="px-4 py-3">
-                  <div className="flex items-center gap-1.5">
-                    <button onClick={() => setEditId(editId === u.id ? null : u.id)}
-                      title="Change Role"
+                  <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                    <button onClick={() => setDetailUser(u)}
+                      title="View Full Profile"
                       className="text-muted-foreground hover:text-primary transition-colors p-1 rounded hover:bg-secondary">
-                      <Key size={14} />
+                      <Eye size={14} />
                     </button>
                     <button onClick={() => toggleStatus(u.id)}
                       title={u.status === "Active" ? "Suspend" : "Reactivate"}
                       className={`transition-colors p-1 rounded hover:bg-secondary ${u.status === "Active" ? "text-muted-foreground hover:text-red-400" : "text-muted-foreground hover:text-green-400"}`}>
                       {u.status === "Active" ? <UserX size={14} /> : <UserCheck size={14} />}
                     </button>
-                    <button title="Reset Password" className="text-muted-foreground hover:text-yellow-400 transition-colors p-1 rounded hover:bg-secondary"><RefreshCw size={14} /></button>
+                    <button onClick={() => app.addNotification({ type: "UserMgmt", subject: `Password reset sent to ${u.name}`, status: "Sent" })}
+                      title="Reset Password" className="text-muted-foreground hover:text-yellow-400 transition-colors p-1 rounded hover:bg-secondary"><RefreshCw size={14} /></button>
                   </div>
                 </td>
               </motion.tr>
             ))}
+            {filtered.length === 0 && (
+              <tr><td colSpan={7} className="px-4 py-10 text-center text-xs text-muted-foreground">No users match your search or filter.</td></tr>
+            )}
           </tbody>
         </table>
       </div>
+
+      {detailUser && (
+        <UserDetailModal user={detailUser} onClose={() => setDetailUser(null)} onToggleStatus={toggleStatus} onChangeRole={changeRole} />
+      )}
+      {showAddModal && (
+        <AddUserModal onClose={() => setShowAddModal(false)} onCreate={createUser} />
+      )}
     </div>
   );
 }
 
+function ConfirmActionModal({ title, description, confirmLabel, icon: Icon, color, onConfirm, onCancel }: { title: string; description: string; confirmLabel: string; icon: React.ElementType; color: { bg: string; border: string; text: string; button: string }; onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <AnimatePresence>
+      <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+        <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onCancel} />
+        <motion.div
+          className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-sm overflow-hidden"
+          initial={{ opacity: 0, scale: 0.92, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 8 }}
+          transition={{ duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] }}
+        >
+          <div className="h-1 w-full bg-gradient-to-r from-primary via-primary/60 to-transparent" />
+          <div className="p-6">
+            <motion.div className={`w-12 h-12 rounded-full ${color.bg} border ${color.border} flex items-center justify-center mx-auto mb-4`}
+              initial={{ scale: 0.5 }} animate={{ scale: 1 }} transition={{ delay: 0.1, type: "spring", stiffness: 200 }}>
+              <Icon size={22} className={color.text} />
+            </motion.div>
+            <h2 className="text-center text-lg font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">{title}</h2>
+            <p className="text-center text-xs text-muted-foreground mt-1.5 leading-relaxed">{description}</p>
+            <div className="flex items-center gap-2 mt-5">
+              <button onClick={onCancel} className="flex-1 px-3 py-2 rounded-md text-xs font-semibold bg-secondary text-foreground hover:bg-secondary/80 transition-colors">Cancel</button>
+              <button onClick={onConfirm} className={`flex-1 px-3 py-2 rounded-md text-xs font-semibold text-white transition-colors ${color.button}`}>{confirmLabel}</button>
+            </div>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+function AnnouncementModal({ onClose, onSend }: { onClose: () => void; onSend: (subject: string, body: string) => void }) {
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const canSend = subject.trim() && body.trim();
+
+  return (
+    <AnimatePresence>
+      <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+        <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onClose} />
+        <motion.div
+          className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-md overflow-hidden"
+          initial={{ opacity: 0, scale: 0.94, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 8 }}
+          transition={{ duration: 0.22, ease: [0.25, 0.46, 0.45, 0.94] }}
+        >
+          <div className="h-1 w-full bg-gradient-to-r from-primary via-primary/60 to-transparent" />
+          <div className="p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">SYSTEM ANNOUNCEMENT</h2>
+              <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-secondary"><X size={18} /></button>
+            </div>
+            <p className="text-xs text-muted-foreground">Broadcast a notification to every Admin and Super Admin account on the platform.</p>
+            <div>
+              <label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Subject</label>
+              <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="e.g. Scheduled maintenance tonight"
+                className="w-full mt-1 bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+            </div>
+            <div>
+              <label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Message</label>
+              <textarea value={body} onChange={e => setBody(e.target.value)} placeholder="Write the announcement details..." rows={4}
+                className="w-full mt-1 bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button onClick={onClose} className="px-3 py-2 rounded-md text-xs font-semibold bg-secondary text-foreground hover:bg-secondary/80 transition-colors">Cancel</button>
+              <motion.button onClick={() => canSend && onSend(subject, body)} disabled={!canSend} whileHover={canSend ? { scale: 1.03 } : {}} whileTap={canSend ? { scale: 0.97 } : {}}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-semibold transition-colors ${canSend ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-secondary text-muted-foreground cursor-not-allowed"}`}>
+                <Send size={14} />Send Announcement
+              </motion.button>
+            </div>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 function SystemSettings() {
+  const app = useApp();
   const [notifications, setNotifications] = useState(true);
+  const [smsAlerts, setSmsAlerts] = useState(false);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [auditLog, setAuditLog] = useState(true);
   const [twoFactor, setTwoFactor] = useState(true);
+  const [autoApprove, setAutoApprove] = useState(false);
+  const [passwordPolicy, setPasswordPolicy] = useState(true);
+  const [sessionTimeout, setSessionTimeout] = useState(true);
+
+  const [lastBackup, setLastBackup] = useState("Jun 30, 2026 · 02:00 AM");
+  const [activeSessions, setActiveSessions] = useState(3);
+  const [lastCacheClear, setLastCacheClear] = useState("Jun 28, 2026 · 06:15 PM");
+  const [lastAuditExport, setLastAuditExport] = useState("—");
+  const [lastAnnouncement, setLastAnnouncement] = useState("—");
+
+  const [confirmAction, setConfirmAction] = useState<null | "backup" | "cache">(null);
+  const [showAnnouncement, setShowAnnouncement] = useState(false);
+
+  const nowStamp = () => new Date().toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }).replace(",", " ·");
+
+  const runBackup = () => {
+    setLastBackup(nowStamp());
+    app.addNotification({ type: "System", subject: "Manual backup completed successfully", status: "Sent" });
+    setConfirmAction(null);
+  };
+  const runCacheClear = () => {
+    setActiveSessions(1);
+    setLastCacheClear(nowStamp());
+    app.addNotification({ type: "System", subject: "Session cache cleared — all other sessions signed out", status: "Sent" });
+    setConfirmAction(null);
+  };
+  const exportAuditLog = () => {
+    const csv = [
+      "time,action,target,user",
+      ...auditEntries.map(l => `"${l.time}","${l.action}","${l.target}","${l.user}"`),
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "audit-log.csv"; a.click();
+    URL.revokeObjectURL(url);
+    setLastAuditExport(nowStamp());
+    app.addNotification({ type: "Export", subject: "Full audit log exported", status: "Sent" });
+  };
+  const sendAnnouncement = (subject: string, body: string) => {
+    app.addNotification({ type: "System", subject: `Announcement: ${subject}`, body, status: "Sent" });
+    setLastAnnouncement(nowStamp());
+    setShowAnnouncement(false);
+  };
 
   const Toggle = ({ on, onChange }: { on: boolean; onChange: () => void }) => (
     <button onClick={onChange} className={`w-10 h-5 rounded-full transition-colors relative flex-shrink-0 ${on ? "bg-primary" : "bg-secondary border border-border"}`}>
       <div className={`w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition-all ${on ? "left-5.5 translate-x-0.5" : "left-0.5"}`} style={{ left: on ? "calc(100% - 18px)" : 2 }} />
     </button>
   );
+
+  const auditEntries = [
+    { action: "Role changed", target: "Carlos Bautista → Suspended", user: "Director Reyes", time: "09:32" },
+    { action: "Program created", target: "Typhoon Preparedness 101", user: "Capt. Santos", time: "08:55" },
+    { action: "User logged in", target: "m.santos@ems.gov", user: "System", time: "08:12" },
+    { action: "Report exported", target: "RPT-2026-018 (PDF)", user: "Lt. Cruz", time: "07:48" },
+    { action: "Scenario launched", target: "Urban Earthquake M7.2", user: "Capt. Santos", time: "Jun 29 · 15:10" },
+  ];
+
+  const platformSettings = [
+    { group: "Notifications", label: "Email Notifications", desc: "Send automated drill confirmations, reminders, and certificate updates via email", value: notifications, set: () => setNotifications(p => !p) },
+    { group: "Notifications", label: "SMS Alerts", desc: "Send critical alerts (session changes, certification expiry) via SMS to enrolled phone numbers", value: smsAlerts, set: () => setSmsAlerts(p => !p) },
+    { group: "Access", label: "Maintenance Mode", desc: "Restrict portal access to Super Admins only during scheduled maintenance windows", value: maintenanceMode, set: () => setMaintenanceMode(p => !p) },
+    { group: "Access", label: "Auto-Approve Registrations", desc: "Automatically activate new participant accounts without manual admin review", value: autoApprove, set: () => setAutoApprove(p => !p) },
+    { group: "Security", label: "Two-Factor Auth (Require)", desc: "Enforce 2FA for all Admin and Super Admin accounts at login", value: twoFactor, set: () => setTwoFactor(p => !p) },
+    { group: "Security", label: "Password Complexity Policy", desc: "Require 12+ characters, mixed case, numbers, and symbols; expire passwords every 90 days", value: passwordPolicy, set: () => setPasswordPolicy(p => !p) },
+    { group: "Security", label: "Auto-Lock Inactive Sessions", desc: "Automatically sign out any session idle for more than 30 minutes", value: sessionTimeout, set: () => setSessionTimeout(p => !p) },
+    { group: "Compliance", label: "Audit Log", desc: "Track all admin actions, role changes, and user logins for compliance review", value: auditLog, set: () => setAuditLog(p => !p) },
+  ];
+
+  const adminActions = [
+    { id: "backup", label: "Force Backup Now", desc: "Create a full snapshot of the database and file storage", icon: Download, color: "text-blue-400", last: lastBackup, onClick: () => setConfirmAction("backup") },
+    { id: "cache", label: "Clear Session Cache", desc: "Sign out all active sessions except your own", icon: RefreshCw, color: "text-yellow-400", last: lastCacheClear, onClick: () => setConfirmAction("cache") },
+    { id: "auditexport", label: "Export Full Audit Log", desc: "Download the complete admin action history as CSV", icon: FileText, color: "text-muted-foreground", last: lastAuditExport, onClick: exportAuditLog },
+    { id: "announce", label: "Send System Announcement", desc: "Broadcast a message to all Admin and Super Admin accounts", icon: Bell, color: "text-muted-foreground", last: lastAnnouncement, onClick: () => setShowAnnouncement(true) },
+  ];
 
   return (
     <div className="space-y-5">
@@ -1699,30 +2170,34 @@ function SystemSettings() {
 
       <motion.div className="grid grid-cols-1 lg:grid-cols-2 gap-4" variants={{ show: { transition: { staggerChildren: 0.1 } } }} initial="hidden" animate="show">
         <motion.div variants={fadeUp} className="bg-card border border-border rounded-lg p-5 space-y-4">
-          <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Platform Settings</h3>
-          {[
-            { label: "Email Notifications", desc: "Send automated drill confirmations and reminders", value: notifications, set: () => setNotifications(p => !p) },
-            { label: "Maintenance Mode", desc: "Restrict portal access for scheduled maintenance", value: maintenanceMode, set: () => setMaintenanceMode(p => !p) },
-            { label: "Audit Log", desc: "Track all admin actions and user logins", value: auditLog, set: () => setAuditLog(p => !p) },
-            { label: "Two-Factor Auth (Require)", desc: "Enforce 2FA for all admin and super admin accounts", value: twoFactor, set: () => setTwoFactor(p => !p) },
-          ].map((s, i) => (
-            <motion.div key={s.label} custom={i} variants={fadeUp} initial="hidden" animate="show" className="flex items-center justify-between gap-4">
-              <div>
-                <div className="text-sm font-medium text-foreground">{s.label}</div>
-                <div className="text-xs text-muted-foreground">{s.desc}</div>
-              </div>
-              <Toggle on={s.value} onChange={s.set} />
-            </motion.div>
+          <div className="flex items-center justify-between">
+            <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Platform Settings</h3>
+            <span className="text-[11px] font-mono text-muted-foreground">{platformSettings.filter(s => s.value).length}/{platformSettings.length} enabled</span>
+          </div>
+          {["Notifications", "Access", "Security", "Compliance"].map(group => (
+            <div key={group} className="space-y-3">
+              <div className="text-[11px] font-mono text-primary/80 uppercase tracking-widest">{group}</div>
+              {platformSettings.filter(s => s.group === group).map((s, i) => (
+                <motion.div key={s.label} custom={i} variants={fadeUp} initial="hidden" animate="show" className="flex items-center justify-between gap-4 pb-3 border-b border-border last:border-b-0 last:pb-0">
+                  <div>
+                    <div className="text-sm font-medium text-foreground">{s.label}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{s.desc}</div>
+                  </div>
+                  <Toggle on={s.value} onChange={s.set} />
+                </motion.div>
+              ))}
+            </div>
           ))}
+          <p className="text-[11px] text-muted-foreground font-mono pt-1">Settings apply instantly and are logged to the audit trail.</p>
         </motion.div>
 
         <motion.div variants={fadeUp} className="bg-card border border-border rounded-lg p-5 space-y-4">
           <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">System Information</h3>
           {[
             { label: "Platform Version", value: "DPTSS v2.4.1" },
-            { label: "Last Backup", value: "Jun 30, 2026 · 02:00 AM" },
+            { label: "Last Backup", value: lastBackup },
             { label: "Database Records", value: "12,847 entries" },
-            { label: "Active Sessions", value: "3 concurrent" },
+            { label: "Active Sessions", value: `${activeSessions} concurrent` },
             { label: "Uptime", value: "99.98% (30 days)" },
             { label: "Storage Used", value: "4.2 GB / 50 GB" },
           ].map((s, i) => (
@@ -1735,13 +2210,7 @@ function SystemSettings() {
 
         <motion.div variants={fadeUp} className="bg-card border border-border rounded-lg p-5 space-y-3">
           <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Recent Audit Log</h3>
-          {[
-            { action: "Role changed", target: "Carlos Bautista → Suspended", user: "Director Reyes", time: "09:32" },
-            { action: "Program created", target: "Typhoon Preparedness 101", user: "Capt. Santos", time: "08:55" },
-            { action: "User logged in", target: "m.santos@ems.gov", user: "System", time: "08:12" },
-            { action: "Report exported", target: "RPT-2026-018 (PDF)", user: "Lt. Cruz", time: "07:48" },
-            { action: "Scenario launched", target: "Urban Earthquake M7.2", user: "Capt. Santos", time: "Jun 29 · 15:10" },
-          ].map((l, i) => (
+          {auditEntries.map((l, i) => (
             <motion.div key={i} custom={i} variants={fadeIn} initial="hidden" animate="show" className="flex items-start gap-3 text-xs border-b border-border pb-2 last:border-b-0 last:pb-0">
               <span className="font-mono text-muted-foreground w-12 flex-shrink-0">{l.time}</span>
               <span className="text-primary font-medium">{l.action}</span>
@@ -1753,20 +2222,45 @@ function SystemSettings() {
 
         <motion.div variants={fadeUp} className="bg-card border border-border rounded-lg p-5 space-y-3">
           <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Admin Actions</h3>
-          {[
-            { label: "Force Backup Now", icon: Download, color: "text-blue-400" },
-            { label: "Clear Session Cache", icon: RefreshCw, color: "text-yellow-400" },
-            { label: "Export Full Audit Log", icon: FileText, color: "text-muted-foreground" },
-            { label: "Send System Announcement", icon: Bell, color: "text-muted-foreground" },
-          ].map(a => (
-            <motion.button key={a.label} whileHover={{ x: 4 }} whileTap={{ scale: 0.98 }} className="w-full flex items-center gap-3 p-3 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors text-left">
-              <a.icon size={16} className={a.color} />
-              <span className="text-sm text-foreground">{a.label}</span>
-              <ChevronRight size={14} className="ml-auto text-muted-foreground" />
+          {adminActions.map(a => (
+            <motion.button key={a.id} onClick={a.onClick} whileHover={{ x: 4 }} whileTap={{ scale: 0.98 }} className="w-full flex items-center gap-3 p-3 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors text-left">
+              <a.icon size={16} className={`${a.color} flex-shrink-0`} />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-foreground">{a.label}</div>
+                <div className="text-[11px] text-muted-foreground truncate">{a.desc}</div>
+                <div className="text-[11px] font-mono text-muted-foreground mt-0.5">Last run: {a.last}</div>
+              </div>
+              <ChevronRight size={14} className="ml-auto text-muted-foreground flex-shrink-0" />
             </motion.button>
           ))}
         </motion.div>
       </motion.div>
+
+      {confirmAction === "backup" && (
+        <ConfirmActionModal
+          title="RUN FULL BACKUP?"
+          description="This creates a full snapshot of the database and file storage (approx. 4.2 GB). The process may take a few minutes and will be logged to the audit trail."
+          confirmLabel="Start Backup"
+          icon={Download}
+          color={{ bg: "bg-blue-500/10", border: "border-blue-500/20", text: "text-blue-400", button: "bg-blue-500 hover:bg-blue-600" }}
+          onConfirm={runBackup}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
+      {confirmAction === "cache" && (
+        <ConfirmActionModal
+          title="CLEAR SESSION CACHE?"
+          description="This will immediately sign out every active session across the platform except your own. Affected users will need to log in again."
+          confirmLabel="Clear Sessions"
+          icon={RefreshCw}
+          color={{ bg: "bg-yellow-500/10", border: "border-yellow-500/20", text: "text-yellow-400", button: "bg-yellow-500 hover:bg-yellow-600" }}
+          onConfirm={runCacheClear}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
+      {showAnnouncement && (
+        <AnnouncementModal onClose={() => setShowAnnouncement(false)} onSend={sendAnnouncement} />
+      )}
     </div>
   );
 }

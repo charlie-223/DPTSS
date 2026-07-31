@@ -2241,7 +2241,11 @@ const trendHistory = [
   { drill: "D5", avgScore: 78, passRate: 75, respTime: 5.9 }, { drill: "D6", avgScore: 82, passRate: 81, respTime: 5.2 },
 ];
 
+const ASSESSOR_PARTICIPANTS = ["Maria Santos", "Jose Reyes", "Carlos Bautista"];
+const SCORE_CATEGORIES = ["Command", "Protocols", "Response Speed", "Coordination"];
+
 function EvalModule() {
+  const app = useApp();
   const [tab, setTab] = useState<EvalTab>("objectives");
   const [objs, setObjs] = useState([
     { id: 1, text: "IC assumes command on radio net", done: true, time: "1:42", limit: "2 min" },
@@ -2257,6 +2261,31 @@ function EvalModule() {
     { subject: "Comms", A: 92, B: 65 }, { subject: "Protocols", A: 85, B: 78 },
     { subject: "Safety", A: 90, B: 82 }, { subject: "Coord.", A: 78, B: 70 },
   ];
+
+  const [assessParticipant, setAssessParticipant] = useState(ASSESSOR_PARTICIPANTS[0]);
+  const [assessScores, setAssessScores] = useState<Record<string, number>>(() =>
+    Object.fromEntries(SCORE_CATEGORIES.map(c => [c, Math.floor(Math.random() * 20 + 75)]))
+  );
+  const [assessNotes, setAssessNotes] = useState("");
+  const [submissions, setSubmissions] = useState([
+    { name: "Maria Santos", score: 94, note: "Excellent command presence." },
+    { name: "Ana Cruz", score: 88, note: "Strong comms, minor SITREP delay." },
+    { name: "Jose Reyes", score: 76, note: "Triage initiated, slow IC comms." },
+  ]);
+  const [justSubmitted, setJustSubmitted] = useState(false);
+
+  const overallScore = Math.round(SCORE_CATEGORIES.reduce((sum, c) => sum + (assessScores[c] ?? 0), 0) / SCORE_CATEGORIES.length);
+
+  const handleSubmitScore = () => {
+    if (!assessParticipant) return;
+    setSubmissions(prev => [{ name: assessParticipant, score: overallScore, note: assessNotes.trim() || "No field observations recorded." }, ...prev]);
+    app.addNotification({ type: "Evaluation", subject: `Score submitted for ${assessParticipant}: ${overallScore}%`, status: "Sent" });
+    setAssessNotes("");
+    setAssessScores(Object.fromEntries(SCORE_CATEGORIES.map(c => [c, Math.floor(Math.random() * 20 + 75)])));
+    setJustSubmitted(true);
+    setTimeout(() => setJustSubmitted(false), 1800);
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -2281,12 +2310,15 @@ function EvalModule() {
       {tab === "assessor" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="bg-card border border-border rounded-lg p-5 space-y-4"><h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Quick Score Entry</h3>
-            <select className="w-full bg-input-background border border-border rounded-md px-2 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"><option>Maria Santos</option><option>Jose Reyes</option><option>Carlos Bautista</option></select>
-            <div className="grid grid-cols-2 gap-3">{["Command", "Protocols", "Response Speed", "Coordination"].map(c => (<div key={c}><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-1">{c}</label><input type="number" min="0" max="100" defaultValue={Math.floor(Math.random() * 20 + 75)} className="w-full bg-input-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>))}</div>
-            <textarea rows={3} placeholder="Field observations..." className="w-full bg-input-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
-            <button className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-2 rounded-md text-sm font-semibold hover:bg-primary/90"><Send size={15} />Submit</button>
+            <select value={assessParticipant} onChange={e => setAssessParticipant(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-2 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary">{ASSESSOR_PARTICIPANTS.map(name => <option key={name} value={name}>{name}</option>)}</select>
+            <div className="grid grid-cols-2 gap-3">{SCORE_CATEGORIES.map(c => (<div key={c}><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-1">{c}</label><input type="number" min="0" max="100" value={assessScores[c]} onChange={e => setAssessScores(prev => ({ ...prev, [c]: Math.max(0, Math.min(100, Number(e.target.value) || 0)) }))} className="w-full bg-input-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>))}</div>
+            <textarea rows={3} value={assessNotes} onChange={e => setAssessNotes(e.target.value)} placeholder="Field observations..." className="w-full bg-input-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+            <div className="flex items-center justify-between">
+              <span className="text-[12px] font-mono text-muted-foreground">Overall: <span className={`font-bold ${overallScore >= 80 ? "text-green-400" : overallScore >= 65 ? "text-primary" : "text-red-400"}`}>{overallScore}%</span></span>
+              <button onClick={handleSubmitScore} disabled={!assessParticipant} className={`flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-semibold transition-colors disabled:opacity-50 ${justSubmitted ? "bg-green-500/90 text-white" : "bg-primary text-primary-foreground hover:bg-primary/90"}`}>{justSubmitted ? <CheckCircle size={15} /> : <Send size={15} />}{justSubmitted ? "Submitted" : "Submit"}</button>
+            </div>
           </div>
-          <div className="bg-card border border-border rounded-lg p-5 space-y-3"><h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Recent Submissions</h3>{[{ name: "Maria Santos", score: 94, note: "Excellent command presence." }, { name: "Ana Cruz", score: 88, note: "Strong comms, minor SITREP delay." }, { name: "Jose Reyes", score: 76, note: "Triage initiated, slow IC comms." }].map((s, i) => (<div key={i} className="p-2.5 rounded-md bg-secondary/60"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-foreground">{s.name}</span><span className={`text-xs font-bold font-mono ${s.score >= 80 ? "text-green-400" : "text-primary"}`}>{s.score}</span></div><p className="text-[12px] text-muted-foreground mt-0.5">{s.note}</p></div>))}</div>
+          <div className="bg-card border border-border rounded-lg p-5 space-y-3"><h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Recent Submissions</h3>{submissions.map((s, i) => (<div key={i} className="p-2.5 rounded-md bg-secondary/60"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-foreground">{s.name}</span><span className={`text-xs font-bold font-mono ${s.score >= 80 ? "text-green-400" : "text-primary"}`}>{s.score}</span></div><p className="text-[12px] text-muted-foreground mt-0.5">{s.note}</p></div>))}</div>
         </div>
       )}
     </div>

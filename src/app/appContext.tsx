@@ -1,7 +1,45 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 
-export type Program = { id: string; title: string; level: string; modules: number; duration: string; status: string };
-export type Session = { id: string; course: string; date: string; time: string; location: string; trainer: string; enrolled: number; capacity: number; status?: string };
+export type ProgramModule = { title: string; duration: string };
+export type Program = {
+  id: string;
+  title: string;
+  level: string;
+  modules: number;
+  duration: string;
+  status: string;
+  description?: string;
+  objectives?: string[];
+  prerequisites?: string;
+  targetAudience?: string;
+  certificationName?: string;
+  passingScore?: number;
+  tags?: string[];
+  createdBy?: string;
+  createdDate?: string;
+  lastUpdated?: string;
+  moduleList?: ProgramModule[];
+};
+export type Session = {
+  id: string;
+  course: string;
+  date: string;
+  time: string;
+  location: string;
+  trainer: string;
+  enrolled: number;
+  capacity: number;
+  status?: string;
+  description?: string;
+  sessionType?: string;
+  contactEmail?: string;
+  materials?: string[];
+  notes?: string;
+  waitlist?: number;
+  createdBy?: string;
+  createdDate?: string;
+  lastUpdated?: string;
+};
 export type Participant = { id: string; name: string; dept?: string; role?: string; level?: string; status?: string; email?: string };
 export type Notification = { id: string; type: string; subject: string; body?: string; date: string; status?: string; read?: boolean };
 export type AttendanceRecord = {
@@ -25,7 +63,11 @@ type AppContextType = {
   darkMode: boolean;
   toggleDarkMode: () => void;
   addProgram: (p: Program) => void;
+  updateProgram: (id: string, updates: Partial<Program>) => void;
+  deleteProgram: (id: string) => void;
   createSession: (s: Session) => string;
+  updateSession: (id: string, updates: Partial<Session>) => void;
+  cancelSession: (id: string) => void;
   launchSession: (id: string) => void;
   registerParticipant: (p: Participant) => void;
   addNotification: (n: Omit<Notification, "id" | "date" | "read">) => void;
@@ -108,10 +150,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [darkMode]);
 
   const addProgram = (p: Program) => setPrograms(prev => [{ ...p, id: uid("PRG") }, ...prev]);
+  const updateProgram = (id: string, updates: Partial<Program>) => {
+    setPrograms(prev => prev.map(p => p.id === id ? { ...p, ...updates, lastUpdated: new Date().toISOString() } : p));
+    addNotification({ type: "Program", subject: `Program updated: ${updates.title ?? id}`, status: "Sent" });
+  };
+  const deleteProgram = (id: string) => setPrograms(prev => prev.filter(p => p.id !== id));
   const createSession = (s: Session) => {
     const newS = { ...s, id: uid("SES") };
     setSessions(prev => [newS, ...prev]);
     return newS.id;
+  };
+  const updateSession = (id: string, updates: Partial<Session>) => {
+    setSessions(prev => prev.map(s => s.id === id ? { ...s, ...updates, lastUpdated: new Date().toISOString() } : s));
+    addNotification({ type: "Session", subject: `Session updated: ${updates.course ?? id}`, status: "Sent" });
+  };
+  const cancelSession = (id: string) => {
+    setSessions(prev => prev.map(s => s.id === id ? { ...s, status: "Cancelled", lastUpdated: new Date().toISOString() } : s));
+    addNotification({ type: "Session", subject: `Session ${id} cancelled`, status: "Sent" });
   };
   const launchSession = (id: string) => {
     setSessions(prev => prev.map(s => s.id === id ? { ...s, status: "Launched" } : s));
@@ -155,7 +210,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   return (
-    <AppContext.Provider value={{ programs, sessions, participants, notifications, attendanceRecords, darkMode, toggleDarkMode, addProgram, createSession, launchSession, registerParticipant, addNotification, exportCSV, addUser, markNotificationRead, markAllNotificationsRead, clearNotification, clearAllNotifications, addAttendanceRecord, getAttendanceFor }}>
+    <AppContext.Provider value={{ programs, sessions, participants, notifications, attendanceRecords, darkMode, toggleDarkMode, addProgram, updateProgram, deleteProgram, createSession, updateSession, cancelSession, launchSession, registerParticipant, addNotification, exportCSV, addUser, markNotificationRead, markAllNotificationsRead, clearNotification, clearAllNotifications, addAttendanceRecord, getAttendanceFor }}>
       {children}
     </AppContext.Provider>
   );

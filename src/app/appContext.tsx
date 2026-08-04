@@ -19,6 +19,9 @@ export type Program = {
   createdDate?: string;
   lastUpdated?: string;
   moduleList?: ProgramModule[];
+  assessor?: string;
+  disasterType?: string;
+  estimatedCost?: number;
 };
 export type Session = {
   id: string;
@@ -41,7 +44,8 @@ export type Session = {
   lastUpdated?: string;
 };
 export type Participant = { id: string; name: string; dept?: string; role?: string; level?: string; status?: string; email?: string };
-export type Notification = { id: string; type: string; subject: string; body?: string; date: string; status?: string; read?: boolean };
+export type NotifAudience = "user" | "admin" | "superadmin";
+export type Notification = { id: string; type: string; subject: string; body?: string; date: string; status?: string; read?: boolean; audience?: NotifAudience[] };
 export type AttendanceRecord = {
   id: string;
   participantId?: string;
@@ -52,6 +56,18 @@ export type AttendanceRecord = {
   status: "Completed" | "In Progress" | "No Show" | "Enrolled";
   score?: number;
   certificate?: string;
+  assessor?: string;
+  evaluated?: boolean;
+};
+export type AssessorEvaluation = {
+  id: string;
+  attendanceId: string;
+  assessorName: string;
+  participantName: string;
+  program: string;
+  rating: number;
+  comments?: string;
+  date: string;
 };
 
 type AppContextType = {
@@ -60,6 +76,7 @@ type AppContextType = {
   participants: Participant[];
   notifications: Notification[];
   attendanceRecords: AttendanceRecord[];
+  assessorEvaluations: AssessorEvaluation[];
   darkMode: boolean;
   toggleDarkMode: () => void;
   addProgram: (p: Program) => void;
@@ -79,11 +96,13 @@ type AppContextType = {
   clearAllNotifications: () => void;
   addAttendanceRecord: (r: Omit<AttendanceRecord, "id">) => void;
   getAttendanceFor: (participantNameOrId: string) => AttendanceRecord[];
+  submitAssessorEvaluation: (e: Omit<AssessorEvaluation, "id" | "date">) => void;
+  getEvaluationsFor: (assessorName: string) => AssessorEvaluation[];
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-const LS_KEYS = { programs: "dptss_programs", sessions: "dptss_sessions", participants: "dptss_participants", notifications: "dptss_notifications", darkMode: "dptss_dark_mode", attendance: "dptss_attendance" };
+const LS_KEYS = { programs: "dptss_programs", sessions: "dptss_sessions", participants: "dptss_participants", notifications: "dptss_notifications", darkMode: "dptss_dark_mode", attendance: "dptss_attendance_v2", evaluations: "dptss_assessor_evaluations" };
 
 function uid(prefix = "id") { return `${prefix}-${Math.random().toString(36).slice(2, 9)}`; }
 
@@ -102,16 +121,16 @@ function seedNotifications(): Notification[] {
 
 function seedAttendance(): AttendanceRecord[] {
   return [
-    { id: uid("ATT"), participantId: "P-001", participantName: "Maria Santos", program: "Earthquake Response", date: "2026-06-29", status: "Completed", score: 94, certificate: "CERT-EQR-2026" },
-    { id: uid("ATT"), participantId: "P-001", participantName: "Maria Santos", program: "Flood Evacuation Protocol", date: "2026-06-22", status: "Completed", score: 88, certificate: "CERT-FEP-2026" },
-    { id: uid("ATT"), participantId: "P-001", participantName: "Maria Santos", program: "Hazmat Level 1", date: "2026-06-08", status: "Completed", score: 91, certificate: "CERT-HZ1-2026" },
-    { id: uid("ATT"), participantId: "P-002", participantName: "Jose Reyes", program: "Wildfire Response Drill", date: "2026-06-25", status: "Completed", score: 85 },
-    { id: uid("ATT"), participantId: "P-002", participantName: "Jose Reyes", program: "CPR Recertification", date: "2026-06-10", status: "Completed", score: 96 },
-    { id: uid("ATT"), participantId: "P-003", participantName: "Ana Cruz", program: "ICS-200 Command Structure", date: "2026-06-18", status: "Completed", score: 90 },
-    { id: uid("ATT"), participantId: "P-003", participantName: "Ana Cruz", program: "Earthquake Response", date: "2026-06-29", status: "Completed", score: 92 },
+    { id: uid("ATT"), participantId: "P-001", participantName: "Maria Santos", program: "Earthquake Response", date: "2026-06-29", status: "Completed", score: 94, certificate: "CERT-EQR-2026", assessor: "Eval. Torres" },
+    { id: uid("ATT"), participantId: "P-001", participantName: "Maria Santos", program: "Flood Evacuation Protocol", date: "2026-06-22", status: "Completed", score: 88, certificate: "CERT-FEP-2026", assessor: "Eval. Lim" },
+    { id: uid("ATT"), participantId: "P-001", participantName: "Maria Santos", program: "Hazmat Level 1", date: "2026-06-08", status: "Completed", score: 91, certificate: "CERT-HZ1-2026", assessor: "Eval. Torres" },
+    { id: uid("ATT"), participantId: "P-002", participantName: "Jose Reyes", program: "Wildfire Response Drill", date: "2026-06-25", status: "Completed", score: 85, assessor: "Eval. Cruz" },
+    { id: uid("ATT"), participantId: "P-002", participantName: "Jose Reyes", program: "CPR Recertification", date: "2026-06-10", status: "Completed", score: 96, assessor: "Eval. Lim" },
+    { id: uid("ATT"), participantId: "P-003", participantName: "Ana Cruz", program: "ICS-200 Command Structure", date: "2026-06-18", status: "Completed", score: 90, assessor: "Eval. Torres" },
+    { id: uid("ATT"), participantId: "P-003", participantName: "Ana Cruz", program: "Earthquake Response", date: "2026-06-29", status: "Completed", score: 92, assessor: "Eval. Torres" },
     { id: uid("ATT"), participantId: "P-004", participantName: "Carlos Bautista", program: "Basic First Aid", date: "2026-06-14", status: "No Show" },
-    { id: uid("ATT"), participantId: "P-005", participantName: "Elena Villanueva", program: "Hazmat Level 2", date: "2026-07-02", status: "In Progress" },
-    { id: uid("ATT"), participantId: "P-005", participantName: "Elena Villanueva", program: "SCBA Field Operations", date: "2026-06-05", status: "Completed", score: 97 },
+    { id: uid("ATT"), participantId: "P-005", participantName: "Elena Villanueva", program: "Hazmat Level 2", date: "2026-07-02", status: "In Progress", assessor: "Eval. Cruz" },
+    { id: uid("ATT"), participantId: "P-005", participantName: "Elena Villanueva", program: "SCBA Field Operations", date: "2026-06-05", status: "Completed", score: 97, assessor: "Eval. Lim" },
   ];
 }
 
@@ -131,12 +150,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(() => {
     try { const v = localStorage.getItem(LS_KEYS.attendance); return v ? JSON.parse(v) : seedAttendance(); } catch { return seedAttendance(); }
   });
+  const [assessorEvaluations, setAssessorEvaluations] = useState<AssessorEvaluation[]>(() => {
+    try { const v = localStorage.getItem(LS_KEYS.evaluations); return v ? JSON.parse(v) : []; } catch { return []; }
+  });
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     try {
       const v = localStorage.getItem(LS_KEYS.darkMode);
       if (v !== null) return v === "true";
-      return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-    } catch { return false; }
+      return true;
+    } catch { return true; }
   });
 
   useEffect(() => { localStorage.setItem(LS_KEYS.programs, JSON.stringify(programs)); }, [programs]);
@@ -144,6 +166,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => { localStorage.setItem(LS_KEYS.participants, JSON.stringify(participants)); }, [participants]);
   useEffect(() => { localStorage.setItem(LS_KEYS.notifications, JSON.stringify(notifications)); }, [notifications]);
   useEffect(() => { localStorage.setItem(LS_KEYS.attendance, JSON.stringify(attendanceRecords)); }, [attendanceRecords]);
+  useEffect(() => { localStorage.setItem(LS_KEYS.evaluations, JSON.stringify(assessorEvaluations)); }, [assessorEvaluations]);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
     localStorage.setItem(LS_KEYS.darkMode, String(darkMode));
@@ -187,6 +210,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const getAttendanceFor = (participantNameOrId: string) =>
     attendanceRecords.filter(r => r.participantId === participantNameOrId || r.participantName === participantNameOrId);
 
+  const submitAssessorEvaluation = (e: Omit<AssessorEvaluation, "id" | "date">) => {
+    const evalRecord: AssessorEvaluation = { id: uid("EVL"), date: new Date().toISOString(), ...e };
+    setAssessorEvaluations(prev => [evalRecord, ...prev]);
+    setAttendanceRecords(prev => prev.map(r => r.id === e.attendanceId ? { ...r, evaluated: true } : r));
+    addNotification({ type: "Evaluation", subject: `${e.participantName} rated ${e.assessorName} (${e.rating}/5) for ${e.program}`, status: "Sent" });
+  };
+  const getEvaluationsFor = (assessorName: string) => assessorEvaluations.filter(e => e.assessorName === assessorName);
+
   const markNotificationRead = (id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
   const markAllNotificationsRead = () => setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   const clearNotification = (id: string) => setNotifications(prev => prev.filter(n => n.id !== id));
@@ -210,7 +241,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   return (
-    <AppContext.Provider value={{ programs, sessions, participants, notifications, attendanceRecords, darkMode, toggleDarkMode, addProgram, updateProgram, deleteProgram, createSession, updateSession, cancelSession, launchSession, registerParticipant, addNotification, exportCSV, addUser, markNotificationRead, markAllNotificationsRead, clearNotification, clearAllNotifications, addAttendanceRecord, getAttendanceFor }}>
+    <AppContext.Provider value={{ programs, sessions, participants, notifications, attendanceRecords, assessorEvaluations, darkMode, toggleDarkMode, addProgram, updateProgram, deleteProgram, createSession, updateSession, cancelSession, launchSession, registerParticipant, addNotification, exportCSV, addUser, markNotificationRead, markAllNotificationsRead, clearNotification, clearAllNotifications, addAttendanceRecord, getAttendanceFor, submitAssessorEvaluation, getEvaluationsFor }}>
       {children}
     </AppContext.Provider>
   );

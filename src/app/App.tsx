@@ -1,3 +1,4 @@
+import { supabase } from '../supabaseClient' // (o kung nasaan ang path ng supabaseClient.ts)
 import { useState, useRef, useEffect } from "react";
 import { AppProvider, useApp, type Program, type Session, type Notification, type AttendanceRecord, type AssessorEvaluation } from "./appContext";
 import { motion, AnimatePresence } from "motion/react";
@@ -4574,7 +4575,19 @@ export default function App() {
     link.type = "image/jpeg";
     link.href = BARANGAY_LOGO_IMG;
     document.head.appendChild(link);
-  }, []);
+    async function loadData() {
+    // Kung "training program" ang eksaktong pangalan sa Supabase dashboard:
+    const { data, error } = await supabase.from('training_program').select('*');
+    if (error) {
+      console.error('Supabase Error:', error);
+    } else {
+      console.log('Data galing Supabase:', data);
+    }
+  }
+  loadData();
+
+}, []); // <-- 4. Dito nagtatapos ang useEffect()
+
 
   if (!auth) {
     if (view === "landing") return <LandingPage onLogin={() => setView("login")} />;
@@ -4589,3 +4602,4 @@ export default function App() {
     </AppProvider>
   );
 }
+
